@@ -1,8 +1,6 @@
 import logging
 from typing import Optional, List, Dict, Any, Tuple
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func
+from datetime import datetime, timezone
 
 from app.core.exceptions import RoleNotAllowed, UserNotFound, EduTwinBaseException
 from app.modules.courses import crud as course_crud
@@ -16,7 +14,7 @@ from app.db.models.lesson import Lesson
 logger = logging.getLogger("edutwin.courses")
 
 async def create_course(
-    db: AsyncSession,
+    db,
     tutor_id: str,
     title: str,
     description: str,
@@ -51,7 +49,7 @@ async def create_course(
     logger.info("Course created: '%s' by tutor ID %s", title, tutor_id)
     return course
 
-async def publish_course(db: AsyncSession, course_id: str, actor_id: str, actor_role: str) -> Dict[str, Any]:
+async def publish_course(db, course_id: str, actor_id: str, actor_role: str) -> Dict[str, Any]:
     course = await course_crud.get_course(db, course_id)
     if not course:
         raise EduTwinBaseException("Course not found.", status_code=404)
@@ -65,7 +63,7 @@ async def publish_course(db: AsyncSession, course_id: str, actor_id: str, actor_
     logger.info("Published course: %s by actor %s", course_id, actor_id)
     return updated
 
-async def get_course_with_lessons(db: AsyncSession, course_id: str, actor_role: Optional[str] = None, actor_id: Optional[str] = None) -> Dict[str, Any]:
+async def get_course_with_lessons(db, course_id: str, actor_role: Optional[str] = None, actor_id: Optional[str] = None) -> Dict[str, Any]:
     course = await course_crud.get_course(db, course_id)
     if not course:
         raise EduTwinBaseException("Course not found.", status_code=404)
@@ -78,7 +76,6 @@ async def get_course_with_lessons(db: AsyncSession, course_id: str, actor_role: 
     # Fetch lessons in sequence order
     lessons, _ = await lesson_crud.list_lessons(db, course_id, limit=200)
     
-    # Format course response with nested lessons
     from app.modules.courses.schemas import CourseResponse
     from app.modules.lessons.schemas import LessonResponse
     
@@ -88,7 +85,7 @@ async def get_course_with_lessons(db: AsyncSession, course_id: str, actor_role: 
     
     return course_detail
 
-async def enroll_student(db: AsyncSession, user_id: str, course_id: str) -> None:
+async def enroll_student(db, user_id: str, course_id: str) -> None:
     # 1. Verify student role
     student = await user_crud.get_user_by_id(db, user_id)
     if not student:
@@ -112,7 +109,7 @@ async def enroll_student(db: AsyncSession, user_id: str, course_id: str) -> None
     await course_crud.enroll_user_in_course(db, user_id, course_id)
     logger.info("Student ID %s enrolled in course %s", user_id, course_id)
 
-async def unenroll_student(db: AsyncSession, user_id: str, course_id: str) -> None:
+async def unenroll_student(db, user_id: str, course_id: str) -> None:
     enrolled = await course_crud.is_user_enrolled(db, user_id, course_id)
     if not enrolled:
         raise EduTwinBaseException("Student is not enrolled in this course.", status_code=400)
@@ -120,7 +117,7 @@ async def unenroll_student(db: AsyncSession, user_id: str, course_id: str) -> No
     await course_crud.unenroll_user_from_course(db, user_id, course_id)
     logger.info("Student ID %s unenrolled from course %s", user_id, course_id)
 
-async def get_student_courses(db: AsyncSession, user_id: str, skip: int = 0, limit: int = 10) -> Dict[str, Any]:
+async def get_student_courses(db, user_id: str, skip: int = 0, limit: int = 10) -> Dict[str, Any]:
     items, total = await course_crud.get_user_courses(db, user_id, skip, limit)
     return {
         "items": items,
@@ -129,11 +126,11 @@ async def get_student_courses(db: AsyncSession, user_id: str, skip: int = 0, lim
         "current_page": (skip // limit) + 1 if limit > 0 else 1
     }
 
-async def get_instructor_dashboard(db: AsyncSession, tutor_id: str) -> Dict[str, Any]:
+async def get_instructor_dashboard(db, tutor_id: str) -> Dict[str, Any]:
     # 1. Total courses created by tutor
-    courses_query = select(Course.id).where(Course.tutor_id == tutor_id, Course.deleted_at == None)
-    courses_res = await db.execute(courses_query)
-    course_ids = [r[0] for r in courses_res.all()]
+    cursor_courses = db.db["courses"].find({"tutor_id": tutor_id, "deleted_at": None}, {"id": 1})
+    courses_docs = await cursor_courses.to_list(length=1000)
+    course_ids = [c["id"] for c in courses_docs]
     
     if not course_ids:
         return {
@@ -143,17 +140,20 @@ async def get_instructor_dashboard(db: AsyncSession, tutor_id: str) -> Dict[str,
         }
         
     # 2. Total student enrollments
-    enrollments_query = select(func.count(UserCourse.user_id)).where(UserCourse.course_id.in_(course_ids))
-    enrollments_res = await db.execute(enrollments_query)
-    total_enrollments = enrollments_res.scalar() or 0
+    total_enrollments = await db.db["user_courses"].count_documents({"course_id": {"$in": course_ids}})
     
     # 3. Unique students count
-    students_query = select(func.count(func.distinct(UserCourse.user_id))).where(UserCourse.course_id.in_(course_ids))
-    students_res = await db.execute(students_query)
-    total_students = students_res.scalar() or 0
+    pipeline = [
+        {"$match": {"course_id": {"$in": course_ids}}},
+        {"$group": {"_id": "$user_id"}},
+        {"$count": "count"}
+    ]
+    cursor = db.db["user_courses"].aggregate(pipeline)
+    res = await cursor.to_list(length=1)
+    total_students = res[0]["count"] if res else 0
     
     return {
         "total_students": total_students,
         "total_enrollments": total_enrollments,
-        "avg_rating": 4.8 # Placeholder rating statistic
+        "avg_rating": 4.8
     }

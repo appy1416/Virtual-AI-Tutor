@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
 from app.core.database import get_db
@@ -17,7 +16,7 @@ async def list_student_notes(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     notes, total = await note_crud.list_notes(db, current_user.id, skip, limit)
     
@@ -44,7 +43,7 @@ async def create_student_note(
     lessonId: str,
     body: NoteCreateRequest,
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     note = await note_service.create_note(db, current_user.id, lessonId, body.content)
     return send_response(
@@ -58,13 +57,12 @@ async def create_student_note(
 async def get_note_by_id(
     noteId: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     note = await note_crud.get_note(db, noteId)
     if not note:
         return send_response(status_code=status.HTTP_404_NOT_FOUND, success=False, message="Note not found.")
         
-    # Check authorization
     if current_user.role != "admin" and note.student_id != current_user.id:
         return send_response(status_code=status.HTTP_403_FORBIDDEN, success=False, message="Unauthorized access.")
         
@@ -75,7 +73,7 @@ async def update_note_by_id(
     noteId: str,
     body: NoteUpdateRequest,
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     note = await note_crud.get_note(db, noteId)
     if not note:
@@ -101,7 +99,7 @@ async def update_note_by_id(
 async def delete_note_by_id(
     noteId: str,
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     note = await note_crud.get_note(db, noteId)
     if not note:
@@ -117,7 +115,7 @@ async def delete_note_by_id(
 async def search_student_notes(
     q: str = Query(""),
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     notes = await note_service.search_notes(db, current_user.id, q)
     
@@ -139,7 +137,7 @@ async def search_student_notes(
 async def summarize_note_by_id(
     noteId: str,
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     note = await note_crud.get_note(db, noteId)
     if not note:

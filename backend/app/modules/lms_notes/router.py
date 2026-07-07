@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 from typing import List, Optional
+import uuid
+from datetime import datetime, timezone
 
 from app.core.database import get_db
 from app.core.security import get_current_user, RoleChecker
@@ -17,17 +17,18 @@ router = APIRouter(tags=["LMS Shared Notes"])
 async def list_lms_notes(
     subject: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     """
     Lists shared study notes, filterable by subject.
     """
-    stmt = select(LMSNote)
+    query = {}
     if subject:
-        stmt = stmt.where(LMSNote.subject == subject)
+        query["subject"] = subject
         
-    res = await db.execute(stmt)
-    notes = res.scalars().all()
+    cursor = db.db["lms_notes"].find(query)
+    notes_docs = await cursor.to_list(length=1000)
+    notes = [LMSNote(**n) for n in notes_docs]
     
     # Audit student downloads/viewing
     await log_activity(db, current_user.id, "list_notes", f"Listed study notes. Filter: {subject}")
@@ -39,22 +40,27 @@ async def list_lms_notes(
 async def create_lms_note(
     body: LMSNoteCreate,
     current_user: User = Depends(RoleChecker(["admin"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     """
     Saves a shared note metadata and sends notifications to students.
     """
-    note = LMSNote(
-        title=body.title,
-        description=body.description,
-        subject=body.subject,
-        file_name=body.file_name,
-        file_url=body.file_url,
-        file_type=body.file_type,
-        uploaded_by=current_user.id
-    )
-    db.add(note)
-    await db.flush()
+    now = datetime.now(timezone.utc)
+    note_id = str(uuid.uuid4())
+    note_doc = {
+        "id": note_id,
+        "title": body.title,
+        "description": body.description,
+        "subject": body.subject,
+        "file_name": body.file_name,
+        "file_url": body.file_url,
+        "file_type": body.file_type,
+        "uploaded_by": current_user.id,
+        "created_at": now,
+        "updated_at": now
+    }
+    await db.db["lms_notes"].insert_one(note_doc)
+    note = LMSNote(**note_doc)
     
     # Audit log
     await log_activity(db, current_user.id, "upload_note", f"Uploaded shared note: {body.title}")
@@ -68,24 +74,19 @@ async def create_lms_note(
         notification_type="note"
     )
     
-    await db.commit()
     return send_response(status_code=status.HTTP_201_CREATED, success=True, data=LMSNoteResponse.model_validate(note))
 
 @router.delete("/lms-notes/{noteId}")
 async def delete_lms_note(
     noteId: str,
     current_user: User = Depends(RoleChecker(["admin"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     """
     Removes shared note metadata.
     """
-    stmt = select(LMSNote).where(LMSNote.id == noteId)
-    res = await db.execute(stmt)
-    note = res.scalars().first()
-    if not note:
+    res = await db.db["lms_notes"].delete_one({"id": noteId})
+    if res.deleted_count == 0:
         return send_response(status_code=status.HTTP_404_NOT_FOUND, success=False, message="Note not found.")
         
-    await db.delete(note)
-    await db.commit()
     return send_response(status_code=status.HTTP_200_OK, success=True, message="Note deleted successfully.")

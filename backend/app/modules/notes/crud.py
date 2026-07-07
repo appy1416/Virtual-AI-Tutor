@@ -1,72 +1,72 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func, and_, or_
 from datetime import datetime, timezone
+import uuid
 from typing import List, Tuple, Optional
-
 from app.db.models.note import Note
 
-async def create_note(db: AsyncSession, student_id: str, lesson_id: str, content: str, word_count: int) -> Note:
-    note = Note(
-        student_id=student_id,
-        lesson_id=lesson_id,
-        content=content,
-        word_count=word_count,
-        tags=[]
-    )
-    db.add(note)
-    await db.flush()
-    return note
+async def create_note(db, student_id: str, lesson_id: str, content: str, word_count: int) -> Note:
+    note_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    note_doc = {
+        "id": note_id,
+        "student_id": student_id,
+        "lesson_id": lesson_id,
+        "content": content,
+        "word_count": word_count,
+        "ai_summary": None,
+        "tags": [],
+        "created_at": now,
+        "updated_at": now,
+        "deleted_at": None
+    }
+    await db.db["notes"].insert_one(note_doc)
+    return Note(**note_doc)
 
-async def get_note(db: AsyncSession, note_id: str) -> Optional[Note]:
-    stmt = select(Note).where(Note.id == note_id, Note.deleted_at == None)
-    res = await db.execute(stmt)
-    return res.scalars().first()
+async def get_note(db, note_id: str) -> Optional[Note]:
+    doc = await db.db["notes"].find_one({"id": note_id, "deleted_at": None})
+    return Note(**doc) if doc else None
 
-async def list_notes(db: AsyncSession, student_id: str, skip: int = 0, limit: int = 20) -> Tuple[List[Note], int]:
-    stmt_count = select(func.count(Note.id)).where(Note.student_id == student_id, Note.deleted_at == None)
-    res_count = await db.execute(stmt_count)
-    total = res_count.scalar() or 0
+async def list_notes(db, student_id: str, skip: int = 0, limit: int = 20) -> Tuple[List[Note], int]:
+    query = {"student_id": student_id, "deleted_at": None}
+    total = await db.db["notes"].count_documents(query)
+    cursor = db.db["notes"].find(query).skip(skip).limit(limit)
+    docs = await cursor.to_list(length=limit)
+    return [Note(**d) for d in docs], total
 
-    stmt = select(Note).where(Note.student_id == student_id, Note.deleted_at == None).offset(skip).limit(limit)
-    res = await db.execute(stmt)
-    return list(res.scalars().all()), total
+async def list_notes_by_lesson(db, lesson_id: str, student_id: str) -> List[Note]:
+    query = {"lesson_id": lesson_id, "student_id": student_id, "deleted_at": None}
+    cursor = db.db["notes"].find(query)
+    docs = await cursor.to_list(length=100)
+    return [Note(**d) for d in docs]
 
-async def list_notes_by_lesson(db: AsyncSession, lesson_id: str, student_id: str) -> List[Note]:
-    stmt = select(Note).where(Note.lesson_id == lesson_id, Note.student_id == student_id, Note.deleted_at == None)
-    res = await db.execute(stmt)
-    return list(res.scalars().all())
-
-async def update_note(db: AsyncSession, note_id: str, content: Optional[str] = None, tags: Optional[List[str]] = None, word_count: Optional[int] = None) -> Optional[Note]:
+async def update_note(db, note_id: str, content: Optional[str] = None, tags: Optional[List[str]] = None, word_count: Optional[int] = None) -> Optional[Note]:
     note = await get_note(db, note_id)
     if not note:
         return None
+    fields = {"updated_at": datetime.now(timezone.utc)}
     if content is not None:
-        note.content = content
+        fields["content"] = content
     if tags is not None:
-        note.tags = tags
+        fields["tags"] = tags
     if word_count is not None:
-        note.word_count = word_count
-    db.add(note)
-    await db.flush()
-    return note
+        fields["word_count"] = word_count
+        
+    await db.db["notes"].update_one({"id": note_id}, {"$set": fields})
+    updated = await db.db["notes"].find_one({"id": note_id})
+    return Note(**updated) if updated else None
 
-async def delete_note(db: AsyncSession, note_id: str) -> bool:
-    note = await get_note(db, note_id)
-    if not note:
-        return False
-    note.deleted_at = datetime.now(timezone.utc)
-    db.add(note)
-    await db.flush()
-    return True
-
-async def search_notes(db: AsyncSession, student_id: str, query: str) -> List[Note]:
-    # Simple ilike SQL query for searching content/tags
-    search_pattern = f"%{query}%"
-    stmt = select(Note).where(
-        Note.student_id == student_id,
-        Note.deleted_at == None,
-        Note.content.ilike(search_pattern)
+async def delete_note(db, note_id: str) -> bool:
+    res = await db.db["notes"].update_one(
+        {"id": note_id, "deleted_at": None},
+        {"$set": {"deleted_at": datetime.now(timezone.utc)}}
     )
-    res = await db.execute(stmt)
-    return list(res.scalars().all())
+    return res.modified_count > 0
+
+async def search_notes(db, student_id: str, query: str) -> List[Note]:
+    query_dict = {
+        "student_id": student_id,
+        "deleted_at": None,
+        "content": {"$regex": query, "$options": "i"}
+    }
+    cursor = db.db["notes"].find(query_dict)
+    docs = await cursor.to_list(length=100)
+    return [Note(**doc) for doc in docs]

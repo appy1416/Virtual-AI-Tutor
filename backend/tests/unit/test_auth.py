@@ -1,13 +1,12 @@
 import pytest
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from app.core.database import MongoSession
 
 from app.db.models.user import User
 from app.core.security import verify_password
 
 @pytest.mark.asyncio
-async def test_register_user_success(client: AsyncClient, db_session: AsyncSession):
+async def test_register_user_success(client: AsyncClient, db_session: MongoSession):
     # Register student
     response = await client.post(
         "/api/v1/auth/register",
@@ -25,8 +24,8 @@ async def test_register_user_success(client: AsyncClient, db_session: AsyncSessi
     assert json_data["data"]["role"] == "student"
     
     # Confirm DB entry
-    res = await db_session.execute(select(User).where(User.email == "student@example.com"))
-    user = res.scalars().first()
+    doc = await db_session.db["users"].find_one({"email": "student@example.com"})
+    user = User(**doc) if doc else None
     assert user is not None
     assert user.full_name == "Test Student"
     assert verify_password("SecurePassword123!", user.password_hash)
@@ -152,7 +151,7 @@ async def test_token_refresh(client: AsyncClient):
     assert "access_token" in response.json()["data"]
 
 @pytest.mark.asyncio
-async def test_password_reset_flow(client: AsyncClient, db_session: AsyncSession):
+async def test_password_reset_flow(client: AsyncClient, db_session: MongoSession):
     # Register user
     await client.post(
         "/api/v1/auth/register",
@@ -171,8 +170,8 @@ async def test_password_reset_flow(client: AsyncClient, db_session: AsyncSession
     assert resp.status_code == 200
     
     # Extract token manually from the database session to simulate finding it in emails/logs
-    res = await db_session.execute(select(User).where(User.email == "reset@example.com"))
-    user = res.scalars().first()
+    doc = await db_session.db["users"].find_one({"email": "reset@example.com"})
+    user = User(**doc) if doc else None
     
     # We generate a reset token using security utils for the user
     from app.core.security import create_access_token

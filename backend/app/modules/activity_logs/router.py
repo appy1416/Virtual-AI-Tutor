@@ -1,6 +1,4 @@
 from fastapi import APIRouter, Depends, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from typing import List, Optional
@@ -29,27 +27,25 @@ async def list_all_activity_logs(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
     current_user: User = Depends(RoleChecker(["admin"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     """
     Lists audit logs of user activities across the platform (Admin only).
     """
-    stmt = select(ActivityLog).order_by(ActivityLog.timestamp.desc()).offset(skip).limit(limit)
-    res = await db.execute(stmt)
-    logs = res.scalars().all()
+    cursor = db.db["activity_logs"].find().sort("timestamp", -1).skip(skip).limit(limit)
+    logs_docs = await cursor.to_list(length=limit)
+    logs = [ActivityLog(**l) for l in logs_docs]
     
     # Resolve student details
     enriched = []
     for l in logs:
-        student_stmt = select(User).where(User.id == l.user_id)
-        student_res = await db.execute(student_stmt)
-        student = student_res.scalars().first()
+        student_doc = await db.db["users"].find_one({"id": l.user_id})
         
         enriched.append({
             "id": l.id,
             "user_id": l.user_id,
-            "user_name": student.full_name if student else "Unknown",
-            "user_email": student.email if student else "",
+            "user_name": student_doc.get("full_name") if student_doc else "Unknown",
+            "user_email": student_doc.get("email") if student_doc else "",
             "action_type": l.action_type,
             "description": l.description,
             "timestamp": l.timestamp

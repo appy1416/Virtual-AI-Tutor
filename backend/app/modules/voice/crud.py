@@ -1,49 +1,51 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func
 from datetime import datetime, timezone
+import uuid
 from typing import List, Tuple, Optional
-
 from app.db.models.voice import VoiceSession
 
 async def create_voice_session(
-    db: AsyncSession,
+    db,
     student_id: str,
     tutor_type: str = "ai_voice",
     lesson_id: Optional[str] = None
 ) -> VoiceSession:
-    sess = VoiceSession(
-        student_id=student_id,
-        tutor_type=tutor_type,
-        lesson_id=lesson_id,
-        duration_seconds=0,
-        audio_quality="medium"
-    )
-    db.add(sess)
-    await db.flush()
-    return sess
+    sess_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    sess_doc = {
+        "id": sess_id,
+        "student_id": student_id,
+        "tutor_type": tutor_type,
+        "lesson_id": lesson_id,
+        "audio_url": None,
+        "transcription": None,
+        "ai_response_audio": None,
+        "duration_seconds": 0,
+        "audio_quality": "medium",
+        "started_at": now,
+        "ended_at": None,
+        "created_at": now
+    }
+    await db.db["voice_sessions"].insert_one(sess_doc)
+    return VoiceSession(**sess_doc)
 
-async def get_voice_session(db: AsyncSession, session_id: str) -> Optional[VoiceSession]:
-    stmt = select(VoiceSession).where(VoiceSession.id == session_id)
-    res = await db.execute(stmt)
-    return res.scalars().first()
+async def get_voice_session(db, session_id: str) -> Optional[VoiceSession]:
+    doc = await db.db["voice_sessions"].find_one({"id": session_id})
+    return VoiceSession(**doc) if doc else None
 
 async def list_voice_sessions(
-    db: AsyncSession,
+    db,
     student_id: str,
     skip: int = 0,
     limit: int = 20
 ) -> Tuple[List[VoiceSession], int]:
-    stmt_count = select(func.count(VoiceSession.id)).where(VoiceSession.student_id == student_id)
-    res_count = await db.execute(stmt_count)
-    total = res_count.scalar() or 0
-
-    stmt = select(VoiceSession).where(VoiceSession.student_id == student_id).order_by(VoiceSession.started_at.desc()).offset(skip).limit(limit)
-    res = await db.execute(stmt)
-    return list(res.scalars().all()), total
+    query = {"student_id": student_id}
+    total = await db.db["voice_sessions"].count_documents(query)
+    cursor = db.db["voice_sessions"].find(query).sort("started_at", -1).skip(skip).limit(limit)
+    docs = await cursor.to_list(length=limit)
+    return [VoiceSession(**d) for d in docs], total
 
 async def update_voice_session(
-    db: AsyncSession,
+    db,
     session_id: str,
     transcription: Optional[str] = None,
     ai_response_audio: Optional[str] = None,
@@ -53,46 +55,49 @@ async def update_voice_session(
     sess = await get_voice_session(db, session_id)
     if not sess:
         return None
+    fields = {}
     if transcription is not None:
-        sess.transcription = transcription
+        fields["transcription"] = transcription
     if ai_response_audio is not None:
-        sess.ai_response_audio = ai_response_audio
+        fields["ai_response_audio"] = ai_response_audio
     if audio_url is not None:
-        sess.audio_url = audio_url
+        fields["audio_url"] = audio_url
     if duration_seconds is not None:
-        sess.duration_seconds = duration_seconds
-    db.add(sess)
-    await db.flush()
-    return sess
+        fields["duration_seconds"] = duration_seconds
+        
+    await db.db["voice_sessions"].update_one({"id": session_id}, {"$set": fields})
+    updated = await db.db["voice_sessions"].find_one({"id": session_id})
+    return VoiceSession(**updated) if updated else None
 
-async def close_voice_session(db: AsyncSession, session_id: str) -> Optional[VoiceSession]:
+async def close_voice_session(db, session_id: str) -> Optional[VoiceSession]:
     sess = await get_voice_session(db, session_id)
     if not sess:
         return None
     ended_at = datetime.now(timezone.utc)
     started_at = sess.started_at
-    if started_at and hasattr(started_at, "tzinfo"):
-        if started_at.tzinfo is None:
-            ended_at = ended_at.replace(tzinfo=None)
-        else:
-            started_at = started_at.astimezone(timezone.utc)
-            ended_at = ended_at.astimezone(timezone.utc)
+    
+    if started_at:
+        if isinstance(started_at, str):
+            try:
+                started_at = datetime.fromisoformat(started_at)
+            except Exception:
+                started_at = ended_at
+        started_at = started_at.astimezone(timezone.utc)
     else:
-        ended_at = ended_at.replace(tzinfo=None)
-    sess.ended_at = ended_at
-    delta = ended_at - (started_at or ended_at)
-    sess.duration_seconds = int(delta.total_seconds())
-    db.add(sess)
-    await db.flush()
-    return sess
+        started_at = ended_at
+        
+    ended_at = ended_at.astimezone(timezone.utc)
+    delta = ended_at - started_at
+    duration = int(delta.total_seconds())
+    
+    fields = {
+        "ended_at": ended_at.isoformat(),
+        "duration_seconds": duration
+    }
+    await db.db["voice_sessions"].update_one({"id": session_id}, {"$set": fields})
+    updated = await db.db["voice_sessions"].find_one({"id": session_id})
+    return VoiceSession(**updated) if updated else None
 
-async def delete_voice_session(db: AsyncSession, session_id: str) -> bool:
-    sess = await get_voice_session(db, session_id)
-    if not sess:
-        return False
-    # Standard DB delete since voice logs are transient/removable or can be soft deleted if needed. 
-    # We will do direct delete or set deleted_at. Since model doesn't have deleted_at field, we delete.
-    from sqlalchemy import delete
-    await db.execute(delete(VoiceSession).where(VoiceSession.id == session_id))
-    await db.flush()
-    return True
+async def delete_voice_session(db, session_id: str) -> bool:
+    res = await db.db["voice_sessions"].delete_one({"id": session_id})
+    return res.deleted_count > 0

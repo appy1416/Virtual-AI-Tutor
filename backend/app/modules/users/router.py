@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, status, UploadFile, File
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user, RoleChecker
@@ -27,7 +26,7 @@ async def get_me(current_user: User = Depends(get_current_user)):
 async def update_me(
     body: UserUpdateRequest, 
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     """
     Updates profile details of the active user.
@@ -50,7 +49,7 @@ async def update_me(
 async def upload_my_avatar(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     """
     Uploads and saves a profile picture for the active user.
@@ -71,7 +70,7 @@ async def upload_my_avatar(
 async def change_my_password(
     body: PasswordChangeRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     """
     Changes the authenticated user's password.
@@ -91,7 +90,7 @@ async def change_my_password(
 @router.get("/{userId}")
 async def get_user_by_admin(
     userId: str,
-    db: AsyncSession = Depends(get_db),
+    db = Depends(get_db),
     admin_user: User = Depends(RoleChecker(["admin"]))
 ):
     """
@@ -108,7 +107,7 @@ async def get_user_by_admin(
 @router.delete("/{userId}")
 async def delete_user_by_admin(
     userId: str,
-    db: AsyncSession = Depends(get_db),
+    db = Depends(get_db),
     admin_user: User = Depends(RoleChecker(["admin"]))
 ):
     """
@@ -132,7 +131,7 @@ async def delete_user_by_admin(
 async def list_users_by_admin(
     skip: int = 0,
     limit: int = 100,
-    db: AsyncSession = Depends(get_db),
+    db = Depends(get_db),
     admin_user: User = Depends(RoleChecker(["admin"]))
 ):
     """

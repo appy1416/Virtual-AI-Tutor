@@ -1,4 +1,3 @@
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any, Tuple, Optional
 
 from app.modules.recommendations import crud as rec_crud
@@ -6,7 +5,7 @@ from app.modules.recommendations.engine import simple_recommendation_engine
 from app.db.models.recommendation import Recommendation
 
 async def get_recommendations(
-    db: AsyncSession,
+    db,
     student_id: str,
     limit: int = 10,
     skip: int = 0
@@ -22,14 +21,12 @@ async def get_recommendations(
         
     return recs, total
 
-async def mark_recommendation_clicked(db: AsyncSession, recommendation_id: str) -> Optional[Recommendation]:
+async def mark_recommendation_clicked(db, recommendation_id: str) -> Optional[Recommendation]:
     return await rec_crud.mark_clicked(db, recommendation_id)
 
-async def generate_recommendations(db: AsyncSession, student_id: str) -> List[Recommendation]:
+async def generate_recommendations(db, student_id: str) -> List[Recommendation]:
     # 1. Clear existing recommendations for this user
-    from sqlalchemy import delete
-    await db.execute(delete(Recommendation).where(Recommendation.student_id == student_id))
-    await db.flush()
+    await db.db["recommendations"].delete_many({"student_id": student_id})
 
     # 2. Run engine
     results = await simple_recommendation_engine(student_id, db)

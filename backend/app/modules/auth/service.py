@@ -1,7 +1,6 @@
 import logging
 from datetime import timedelta, datetime, timezone
 from typing import Tuple
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import (
@@ -27,7 +26,7 @@ from app.utils.lms_helpers import log_activity
 logger = logging.getLogger("edutwin.auth")
 
 async def register_user(
-    db: AsyncSession, 
+    db, 
     email: str, 
     password: str, 
     full_name: str,
@@ -36,18 +35,15 @@ async def register_user(
     """
     Registers a new student or admin. Validates input formatting and checks email uniqueness.
     """
-    # 1. Clean and validate inputs
     email = validate_email(email)
     validate_password(password)
     full_name = validate_full_name(full_name)
     
-    # 2. Check duplicate email
     existing_user = await crud.get_user_by_email(db, email)
     if existing_user:
         logger.warning("Registration attempt failed: email %s already in use", email)
         raise UserAlreadyExists()
         
-    # 3. Hash password and create record
     hashed_pwd = hash_password(password)
     new_user = await crud.create_user(
         db=db, 
@@ -62,7 +58,7 @@ async def register_user(
     return UserResponse.model_validate(new_user)
 
 async def login_user(
-    db: AsyncSession, 
+    db, 
     email: str, 
     password: str
 ) -> Tuple[str, str, UserResponse]:
@@ -76,7 +72,6 @@ async def login_user(
         logger.warning("Failed login attempt for email: %s", email)
         raise InvalidCredentials()
         
-    # Create tokens
     access_token = create_access_token(data={"sub": user.id, "role": user.role})
     refresh_token = create_refresh_token(data={"sub": user.id})
     
@@ -84,7 +79,7 @@ async def login_user(
     await log_activity(db, user.id, "login", f"User logged in: {email}")
     return access_token, refresh_token, UserResponse.model_validate(user)
 
-async def refresh_access_token(db: AsyncSession, refresh_token: str) -> str:
+async def refresh_access_token(db, refresh_token: str) -> str:
     """
     Decodes a refresh token and issues a new access token if valid.
     """
@@ -93,7 +88,6 @@ async def refresh_access_token(db: AsyncSession, refresh_token: str) -> str:
         logger.warning("Token refresh failed: invalid or expired refresh token.")
         raise TokenInvalid("Invalid refresh token or user not found.")
         
-    # Generate new access token
     new_access_token = create_access_token(data={"sub": user.id, "role": user.role})
     logger.info("Issued new access token for user ID: %s via refresh token", user.id)
     return new_access_token
@@ -105,7 +99,6 @@ async def logout_user(token: str) -> None:
     try:
         payload = verify_token(token, "access")
         exp = payload.get("exp")
-        # Calculate time remaining until natural token expiry
         now = datetime.now(timezone.utc).timestamp()
         seconds_remaining = int(exp - now) if exp else 86400
         
@@ -114,39 +107,33 @@ async def logout_user(token: str) -> None:
             logger.info("Access token blacklisted successfully on logout.")
     except Exception as e:
         logger.error("Error during token blacklisting: %s", e)
-        # We don't raise an exception to allow the logout to clean client storage anyway
 
-async def initiate_password_reset(db: AsyncSession, email: str) -> None:
+async def initiate_password_reset(db, email: str) -> None:
     """
     Generates a secure password reset link and writes it to logs.
-    In production, this would trigger an SMTP email transport.
     """
     email = email.strip().lower()
     user = await crud.get_user_by_email(db, email)
     if not user:
-        # Prevent email enumeration attacks by logging but returning success anyway
         logger.warning("Password reset requested for non-existent email: %s", email)
         return
         
-    # Generate a short-lived reset token (expires in 15 minutes)
     reset_payload = {
         "sub": user.id,
         "email": user.email,
         "type": "reset",
         "exp": datetime.now(timezone.utc) + timedelta(minutes=15)
     }
-    reset_token = jwt_encode = create_access_token(data=reset_payload, expires_delta=timedelta(minutes=15))
+    reset_token = create_access_token(data=reset_payload, expires_delta=timedelta(minutes=15))
     
-    # We construct a reset link
     reset_link = f"{settings.FRONTEND_URL}/auth/reset-password?token={reset_token}"
     
-    # Write to local logs for verification
     logger.info("--- PASSWORD RESET LINK GENERATED ---")
     logger.info("Sent to: %s", email)
     logger.info("Link: %s", reset_link)
     logger.info("-------------------------------------")
 
-async def reset_password(db: AsyncSession, token: str, new_password: str) -> None:
+async def reset_password(db, token: str, new_password: str) -> None:
     """
     Validates a password reset token and updates the user's password.
     """
@@ -160,10 +147,8 @@ async def reset_password(db: AsyncSession, token: str, new_password: str) -> Non
     if not user:
         raise UserNotFound()
         
-    # Validate and hash new password
     validate_password(new_password)
     hashed_pwd = hash_password(new_password)
     
-    # Update password in DB
     await crud.update_user(db, user_id, password_hash=hashed_pwd)
     logger.info("Successfully reset password for user ID: %s", user_id)

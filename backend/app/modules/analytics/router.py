@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, status, Query
 from fastapi.responses import Response
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user, RoleChecker
@@ -15,7 +14,7 @@ router = APIRouter(tags=["Analytics"])
 @router.get("/analytics/dashboard")
 async def get_student_dashboard_metrics(
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     dashboard = await analytics_service.get_dashboard(db, current_user.id)
     return send_response(status_code=status.HTTP_200_OK, success=True, data=dashboard)
@@ -24,7 +23,7 @@ async def get_student_dashboard_metrics(
 async def get_student_learning_progress(
     courseId: str,
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     progress = await analytics_service.get_progress(db, current_user.id, courseId)
     return send_response(status_code=status.HTTP_200_OK, success=True, data=progress)
@@ -34,13 +33,10 @@ async def get_student_quiz_performance_list(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
-    records, total = analytics_crud.get_student_performance(db, current_user.id, skip, limit)
-    # Since it is a coroutine:
     records, total = await analytics_crud.get_student_performance(db, current_user.id, skip, limit)
     
-    # Format list
     items = []
     for r in records:
         items.append({
@@ -63,7 +59,7 @@ async def get_student_quiz_performance_list(
 @router.get("/analytics/export")
 async def export_student_data_csv(
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     csv_data = await analytics_service.export_learning_data(db, current_user.id)
     return Response(

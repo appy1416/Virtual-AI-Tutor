@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, status, Query, UploadFile, File
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
 from app.core.database import get_db
@@ -16,7 +15,7 @@ router = APIRouter(tags=["Voice"])
 async def start_voice_session(
     body: VoiceSessionRequest,
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     sess = await voice_service.create_session(
         db=db,
@@ -36,7 +35,7 @@ async def list_voice_sessions(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     sessions, total = await voice_service.get_voice_sessions_for_student(db, current_user.id, skip, limit)
     items = [VoiceSessionResponse.model_validate(s) for s in sessions]
@@ -51,7 +50,7 @@ async def list_voice_sessions(
 async def get_voice_session_details(
     sessionId: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     sess = await voice_crud.get_voice_session(db, sessionId)
     if not sess:
@@ -67,10 +66,8 @@ async def upload_session_audio(
     sessionId: str,
     file: UploadFile = File(...),
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
-    # Validate size < 50MB (52428800 bytes)
-    # Check format in validators or simple check here
     from app.utils.validators import validate_audio_file
     validate_audio_file(file)
 
@@ -88,7 +85,7 @@ async def upload_session_audio(
 async def get_voice_session_transcript(
     sessionId: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     sess = await voice_crud.get_voice_session(db, sessionId)
     if not sess:
@@ -104,7 +101,7 @@ async def get_voice_session_transcript(
 async def end_voice_session(
     sessionId: str,
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     sess = await voice_crud.get_voice_session(db, sessionId)
     if not sess:
@@ -121,7 +118,6 @@ async def text_to_speech_mock(
     text: str,
     current_user: User = Depends(get_current_user)
 ):
-    # Mock TTS audio URL response
     return send_response(
         status_code=status.HTTP_200_OK,
         success=True,

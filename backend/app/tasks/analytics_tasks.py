@@ -1,7 +1,7 @@
 import asyncio
 from typing import Dict, Any
 from app.tasks.celery_app import celery_app
-from app.core.database import AsyncSessionLocal
+from app.core.database import mongo_db, MongoSession
 from app.modules.analytics import crud as analytics_crud
 from app.modules.recommendations import service as rec_service
 
@@ -18,7 +18,7 @@ def run_async(coro):
         return asyncio.run(coro)
 
 async def _log_page_view(student_id: str, page: str, duration: int):
-    async with AsyncSessionLocal() as db:
+    async with MongoSession(mongo_db) as db:
         await analytics_crud.create_event(
             db=db,
             student_id=student_id,
@@ -32,15 +32,13 @@ def log_page_view(student_id: str, page: str, duration: int):
     run_async(_log_page_view(student_id, page, duration))
 
 async def _log_quiz_attempt(student_id: str, quiz_id: str, score: int, time_spent_seconds: int):
-    async with AsyncSessionLocal() as db:
-        # Create event
+    async with MongoSession(mongo_db) as db:
         await analytics_crud.create_event(
             db=db,
             student_id=student_id,
             event_type="quiz_attempt",
             metadata_json={"quiz_id": quiz_id, "score": score, "time_spent": time_spent_seconds}
         )
-        # Create student performance record
         from app.modules.quizzes import crud as quiz_crud
         quiz = await quiz_crud.get_quiz(db, quiz_id)
         if quiz:
@@ -53,7 +51,6 @@ async def _log_quiz_attempt(student_id: str, quiz_id: str, score: int, time_spen
                 accuracy=score,
                 time_spent_seconds=time_spent_seconds
             )
-            # Update learning twin gaps
             from app.modules.learning_twin.profiler import update_learning_gaps_from_quizzes
             await update_learning_gaps_from_quizzes(student_id, db)
             
@@ -64,7 +61,7 @@ def log_quiz_attempt(student_id: str, quiz_id: str, score: int, time_spent_secon
     run_async(_log_quiz_attempt(student_id, quiz_id, score, time_spent_seconds))
 
 async def _log_lesson_completion(student_id: str, lesson_id: str):
-    async with AsyncSessionLocal() as db:
+    async with MongoSession(mongo_db) as db:
         await analytics_crud.create_event(
             db=db,
             student_id=student_id,
@@ -78,7 +75,7 @@ def log_lesson_completion(student_id: str, lesson_id: str):
     run_async(_log_lesson_completion(student_id, lesson_id))
 
 async def _log_note_creation(student_id: str, note_id: str):
-    async with AsyncSessionLocal() as db:
+    async with MongoSession(mongo_db) as db:
         await analytics_crud.create_event(
             db=db,
             student_id=student_id,
@@ -92,7 +89,7 @@ def log_note_creation(student_id: str, note_id: str):
     run_async(_log_note_creation(student_id, note_id))
 
 async def _log_chat_message(student_id: str, char_count: int):
-    async with AsyncSessionLocal() as db:
+    async with MongoSession(mongo_db) as db:
         await analytics_crud.create_event(
             db=db,
             student_id=student_id,
@@ -106,7 +103,7 @@ def log_chat_message(student_id: str, char_count: int):
     run_async(_log_chat_message(student_id, char_count))
 
 async def _refresh_recommendations(student_id: str):
-    async with AsyncSessionLocal() as db:
+    async with MongoSession(mongo_db) as db:
         await rec_service.generate_recommendations(db, student_id)
         await db.commit()
 
@@ -115,7 +112,7 @@ def refresh_recommendations(student_id: str):
     run_async(_refresh_recommendations(student_id))
 
 async def _cleanup_old_events(days: int = 90):
-    async with AsyncSessionLocal() as db:
+    async with MongoSession(mongo_db) as db:
         await analytics_crud.delete_old_events(db, days)
         await db.commit()
 

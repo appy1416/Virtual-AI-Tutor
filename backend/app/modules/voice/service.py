@@ -1,4 +1,3 @@
-from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import UploadFile, HTTPException, status
 from typing import List, Tuple, Optional
 
@@ -8,7 +7,7 @@ from app.modules.voice.file_handler import upload_to_cloud
 from app.db.models.voice import VoiceSession
 
 async def create_session(
-    db: AsyncSession,
+    db,
     student_id: str,
     tutor_type: str = "ai_voice",
     lesson_id: Optional[str] = None
@@ -16,7 +15,7 @@ async def create_session(
     return await voice_crud.create_voice_session(db, student_id, tutor_type, lesson_id)
 
 async def process_voice_upload(
-    db: AsyncSession,
+    db,
     session_id: str,
     audio_file: UploadFile
 ) -> Optional[VoiceSession]:
@@ -41,15 +40,15 @@ async def process_voice_upload(
     )
     return updated
 
-async def close_session(db: AsyncSession, session_id: str) -> Optional[VoiceSession]:
+async def close_session(db, session_id: str) -> Optional[VoiceSession]:
     return await voice_crud.close_voice_session(db, session_id)
 
-async def get_session_transcript(db: AsyncSession, session_id: str) -> Optional[str]:
+async def get_session_transcript(db, session_id: str) -> Optional[str]:
     sess = await voice_crud.get_voice_session(db, session_id)
     return sess.transcription if sess else None
 
 async def get_voice_sessions_for_student(
-    db: AsyncSession,
+    db,
     student_id: str,
     skip: int = 0,
     limit: int = 20

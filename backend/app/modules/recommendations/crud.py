@@ -1,13 +1,10 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func, delete
 from datetime import datetime, timezone, timedelta
+import uuid
 from typing import List, Tuple, Optional
-
 from app.db.models.recommendation import Recommendation
 
 async def create_recommendation(
-    db: AsyncSession,
+    db,
     student_id: str,
     recommendation_type: str,
     target_id: str,
@@ -15,46 +12,45 @@ async def create_recommendation(
     reason: str,
     relevance_score: int
 ) -> Recommendation:
-    rec = Recommendation(
-        student_id=student_id,
-        recommendation_type=recommendation_type,
-        target_id=target_id,
-        target_title=target_title,
-        reason=reason,
-        relevance_score=relevance_score,
-        clicked=False
-    )
-    db.add(rec)
-    await db.flush()
-    return rec
+    rec_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    rec_doc = {
+        "id": rec_id,
+        "student_id": student_id,
+        "recommendation_type": recommendation_type,
+        "target_id": target_id,
+        "target_title": target_title,
+        "reason": reason,
+        "relevance_score": relevance_score,
+        "clicked": False,
+        "created_at": now,
+        "updated_at": now
+    }
+    await db.db["recommendations"].insert_one(rec_doc)
+    return Recommendation(**rec_doc)
 
 async def get_recommendations(
-    db: AsyncSession,
+    db,
     student_id: str,
     limit: int = 10,
     skip: int = 0
 ) -> Tuple[List[Recommendation], int]:
-    stmt_count = select(func.count(Recommendation.id)).where(Recommendation.student_id == student_id)
-    res_count = await db.execute(stmt_count)
-    total = res_count.scalar() or 0
+    query = {"student_id": student_id}
+    total = await db.db["recommendations"].count_documents(query)
+    cursor = db.db["recommendations"].find(query).sort("relevance_score", -1).skip(skip).limit(limit)
+    docs = await cursor.to_list(length=limit)
+    return [Recommendation(**d) for d in docs], total
 
-    stmt = select(Recommendation).where(Recommendation.student_id == student_id).order_by(Recommendation.relevance_score.desc()).offset(skip).limit(limit)
-    res = await db.execute(stmt)
-    return list(res.scalars().all()), total
+async def mark_clicked(db, recommendation_id: str) -> Optional[Recommendation]:
+    now = datetime.now(timezone.utc)
+    await db.db["recommendations"].update_one(
+        {"id": recommendation_id},
+        {"$set": {"clicked": True, "updated_at": now}}
+    )
+    updated = await db.db["recommendations"].find_one({"id": recommendation_id})
+    return Recommendation(**updated) if updated else None
 
-async def mark_clicked(db: AsyncSession, recommendation_id: str) -> Optional[Recommendation]:
-    stmt = select(Recommendation).where(Recommendation.id == recommendation_id)
-    res = await db.execute(stmt)
-    rec = res.scalars().first()
-    if not rec:
-        return None
-    rec.clicked = True
-    db.add(rec)
-    await db.flush()
-    return rec
-
-async def delete_old_recommendations(db: AsyncSession, days: int = 30) -> int:
+async def delete_old_recommendations(db, days: int = 30) -> int:
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    stmt = delete(Recommendation).where(Recommendation.created_at < cutoff)
-    res = await db.execute(stmt)
-    return res.rowcount
+    res = await db.db["recommendations"].delete_many({"created_at": {"$lt": cutoff}})
+    return res.deleted_count

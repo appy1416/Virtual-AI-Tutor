@@ -1,7 +1,6 @@
 import pytest
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from app.core.database import MongoSession
 
 from app.db.models.user import User
 from app.db.models.course import Course
@@ -10,7 +9,7 @@ from app.core.security import create_access_token
 
 
 @pytest.mark.asyncio
-async def test_create_course_permissions(client: AsyncClient, db_session: AsyncSession):
+async def test_create_course_permissions(client: AsyncClient, db_session: MongoSession):
     # Create a tutor, a student, and an admin
     tutor = User(email="tutor@example.com", password_hash="hash", full_name="Tutor One", role="tutor")
     student = User(email="std1@example.com", password_hash="hash", full_name="Student One", role="student")
@@ -52,7 +51,7 @@ async def test_create_course_permissions(client: AsyncClient, db_session: AsyncS
     assert resp2.status_code == 403
 
 @pytest.mark.asyncio
-async def test_course_enrollment_flow(client: AsyncClient, db_session: AsyncSession):
+async def test_course_enrollment_flow(client: AsyncClient, db_session: MongoSession):
     # Setup tutor, student, course
     tutor = User(email="t1@example.com", password_hash="hash", full_name="Tutor", role="tutor")
     student = User(email="s1@example.com", password_hash="hash", full_name="Student", role="student")
@@ -85,10 +84,8 @@ async def test_course_enrollment_flow(client: AsyncClient, db_session: AsyncSess
     assert resp.json()["success"] is True
     
     # Verify enrollment entry
-    enroll = await db_session.execute(
-        select(UserCourse).where(UserCourse.user_id == student.id, UserCourse.course_id == course.id)
-    )
-    assert enroll.scalars().first() is not None
+    enroll_doc = await db_session.db["user_courses"].find_one({"user_id": student.id, "course_id": course.id})
+    assert enroll_doc is not None
     
     # 2. Duplicate enrollment - Failure (400)
     resp_dup = await client.post(
@@ -105,7 +102,7 @@ async def test_course_enrollment_flow(client: AsyncClient, db_session: AsyncSess
     assert resp_tutor.status_code == 403
 
 @pytest.mark.asyncio
-async def test_get_courses_pagination_and_filtering(client: AsyncClient, db_session: AsyncSession):
+async def test_get_courses_pagination_and_filtering(client: AsyncClient, db_session: MongoSession):
     tutor = User(email="tutor3@example.com", password_hash="hash", full_name="Tutor", role="tutor")
     db_session.add(tutor)
     await db_session.commit()
@@ -141,7 +138,7 @@ async def test_get_courses_pagination_and_filtering(client: AsyncClient, db_sess
     assert resp_pag.json()["data"]["page_count"] == 2
 
 @pytest.mark.asyncio
-async def test_course_soft_delete(client: AsyncClient, db_session: AsyncSession):
+async def test_course_soft_delete(client: AsyncClient, db_session: MongoSession):
     tutor = User(email="tutor4@example.com", password_hash="hash", full_name="Tutor", role="tutor")
     db_session.add(tutor)
     await db_session.commit()
@@ -165,10 +162,6 @@ async def test_course_soft_delete(client: AsyncClient, db_session: AsyncSession)
     list_resp = await client.get("/api/v1/courses")
     assert not any(c["id"] == course.id for c in list_resp.json()["data"]["items"])
     
-    # 3. Verify it is still in the DB but has deleted_at set
-    res = await db_session.execute(
-        select(Course).where(Course.id == course.id)
-    )
-    db_course = res.scalars().first()
-    assert db_course is not None
-    assert db_course.deleted_at is not None
+    db_course_doc = await db_session.db["courses"].find_one({"id": course.id})
+    assert db_course_doc is not None
+    assert db_course_doc.get("deleted_at") is not None

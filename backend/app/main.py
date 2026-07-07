@@ -106,39 +106,15 @@ app.include_router(activity_logs_router, prefix="/api/v1")
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info("Initializing database tables...")
-    from app.core.database import Base, engine, AsyncSessionLocal
+    logger.info("Verifying MongoDB connection...")
+    from app.core.database import verify_mongodb_connection, mongo_db
     from app.db.seed import seed_data
     
-    # Explicitly import all models so that Base.metadata knows about them
-    from app.db.models.user import User
-    from app.db.models.course import Course
-    from app.db.models.lesson import Lesson, LessonCompletion
-    from app.db.models.quiz import Quiz, QuizAnswer
-    from app.db.models.note import Note
-    from app.db.models.chat import ChatHistory
-    from app.db.models.analytics import AnalyticsEvent, StudentPerformance
-    from app.db.models.recommendation import Recommendation
-    from app.db.models.learning_twin import LearningTwin
-    from app.db.models.voice import VoiceSession
-    from app.db.models.user_course import UserCourse
-    from app.db.models.notification import Notification
-    from app.db.models.activity_log import ActivityLog
-    from app.db.models.assignment import Assignment, AssignmentSubmission
-    from app.db.models.lms_note import LMSNote
+    # 1. Connect and verify
+    await verify_mongodb_connection()
     
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        
-    from app.core.database import is_mongo, load_from_mongodb_to_sqlite
-    if is_mongo:
-        logger.info("Loading existing database documents from MongoDB Atlas...")
-        async with AsyncSessionLocal() as session:
-            await load_from_mongodb_to_sqlite(session)
-        
-    logger.info("Seeding initial database data...")
-    async with AsyncSessionLocal() as session:
-        await seed_data(session)
+    # 2. Run seed
+    await seed_data(mongo_db)
 
 
 @app.get("/health")

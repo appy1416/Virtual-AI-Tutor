@@ -1,14 +1,13 @@
 import pytest
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from app.core.database import MongoSession
 
 from app.db.models.user import User
 from app.core.security import create_access_token
 from app.modules.users import crud
 
 @pytest.mark.asyncio
-async def test_get_profile_me_authenticated(client: AsyncClient, db_session: AsyncSession):
+async def test_get_profile_me_authenticated(client: AsyncClient, db_session: MongoSession):
     # Setup test user record manually in DB
     user = User(
         email="me@example.com",
@@ -41,7 +40,7 @@ async def test_get_profile_me_unauthorized(client: AsyncClient):
     assert response.status_code == 401
 
 @pytest.mark.asyncio
-async def test_update_profile_me(client: AsyncClient, db_session: AsyncSession):
+async def test_update_profile_me(client: AsyncClient, db_session: MongoSession):
     user = User(
         email="update@example.com",
         password_hash="hashedpwd",
@@ -74,7 +73,7 @@ async def test_update_profile_me(client: AsyncClient, db_session: AsyncSession):
     assert json_data["data"]["preferences"]["sound"] == "on"
 
 @pytest.mark.asyncio
-async def test_change_password(client: AsyncClient, db_session: AsyncSession):
+async def test_change_password(client: AsyncClient, db_session: MongoSession):
     from app.core.security import hash_password
     user = User(
         email="changepwd@example.com",
@@ -110,7 +109,7 @@ async def test_change_password(client: AsyncClient, db_session: AsyncSession):
     assert login_resp.status_code == 200
 
 @pytest.mark.asyncio
-async def test_role_based_access_control(client: AsyncClient, db_session: AsyncSession):
+async def test_role_based_access_control(client: AsyncClient, db_session: MongoSession):
     # Create student and admin records
     student = User(email="std@example.com", password_hash="hash", full_name="Student User", role="student")
     admin = User(email="adm@example.com", password_hash="hash", full_name="Admin User", role="admin")
@@ -139,7 +138,7 @@ async def test_role_based_access_control(client: AsyncClient, db_session: AsyncS
     assert len(resp.json()["data"]) >= 2
 
 @pytest.mark.asyncio
-async def test_soft_delete(client: AsyncClient, db_session: AsyncSession):
+async def test_soft_delete(client: AsyncClient, db_session: MongoSession):
     # Create student and admin records
     student = User(email="delete-me@example.com", password_hash="hash", full_name="Delete User", role="student")
     admin = User(email="adm2@example.com", password_hash="hash", full_name="Admin User", role="admin")
@@ -157,13 +156,9 @@ async def test_soft_delete(client: AsyncClient, db_session: AsyncSession):
     )
     assert resp.status_code == 200
     
-    # Verify in DB that deleted_at is not null
-    res = await db_session.execute(
-        select(User).where(User.id == student.id)
-    )
-    user = res.scalars().first()
-    assert user is not None
-    assert user.deleted_at is not None
+    user_doc = await db_session.db["users"].find_one({"id": student.id})
+    assert user_doc is not None
+    assert user_doc.get("deleted_at") is not None
     
     # Verify CRUD ignores soft-deleted
     user_by_email = await crud.get_user_by_email(db_session, student.email)

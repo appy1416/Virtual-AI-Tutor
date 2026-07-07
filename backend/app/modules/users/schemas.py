@@ -10,7 +10,7 @@ class UserResponse(BaseModel):
     created_at: datetime
     profile_picture_url: Optional[str] = None
     bio: Optional[str] = None
-    preferences: Dict[str, Any] = {}
+    preferences: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True

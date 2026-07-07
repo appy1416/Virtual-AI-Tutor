@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const rawBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const rawBaseUrl = import.meta.env.VITE_API_BASE_URL || 'https://virtual-ai-tutor-tqet.onrender.com';
 export const API_BASE_URL = rawBaseUrl.endsWith('/api/v1') ? rawBaseUrl : `${rawBaseUrl}/api/v1`;
 
 const api = axios.create({

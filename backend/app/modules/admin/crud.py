@@ -1,12 +1,7 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func, and_
 from datetime import datetime, timezone
 from typing import List, Tuple, Optional, Dict, Any
-
 from app.db.models.user import User
 
-# In-memory settings for platform control
 _PLATFORM_SETTINGS = {
     "platform_name": "EduTwin AI",
     "max_file_size": 52428800,  # 50MB
@@ -19,66 +14,44 @@ _PLATFORM_SETTINGS = {
 }
 
 async def list_all_users(
-    db: AsyncSession,
+    db,
     skip: int = 0,
     limit: int = 50,
     role: Optional[str] = None
 ) -> Tuple[List[User], int]:
-    conditions = []
+    query = {}
     if role:
-        conditions.append(User.role == role)
+        query["role"] = role
         
-    stmt_count = select(func.count(User.id))
-    if conditions:
-        stmt_count = stmt_count.where(and_(*conditions))
-    res_count = await db.execute(stmt_count)
-    total = res_count.scalar() or 0
+    total = await db.db["users"].count_documents(query)
+    cursor = db.db["users"].find(query).skip(skip).limit(limit)
+    docs = await cursor.to_list(length=limit)
+    return [User(**d) for d in docs], total
 
-    stmt = select(User)
-    if conditions:
-        stmt = stmt.where(and_(*conditions))
-    stmt = stmt.offset(skip).limit(limit)
-    res = await db.execute(stmt)
-    return list(res.scalars().all()), total
+async def get_user_admin_view(db, user_id: str) -> Optional[User]:
+    doc = await db.db["users"].find_one({"id": user_id})
+    return User(**doc) if doc else None
 
-async def get_user_admin_view(db: AsyncSession, user_id: str) -> Optional[User]:
-    # Admin can view even deactivated users
-    stmt = select(User).where(User.id == user_id)
-    res = await db.execute(stmt)
-    return res.scalars().first()
+async def update_user_role(db, user_id: str, new_role: str) -> Optional[User]:
+    await db.db["users"].update_one({"id": user_id}, {"$set": {"role": new_role, "updated_at": datetime.now(timezone.utc)}})
+    updated = await db.db["users"].find_one({"id": user_id})
+    return User(**updated) if updated else None
 
-async def update_user_role(db: AsyncSession, user_id: str, new_role: str) -> Optional[User]:
-    stmt = select(User).where(User.id == user_id)
-    res = await db.execute(stmt)
-    user = res.scalars().first()
-    if not user:
-        return None
-    user.role = new_role
-    db.add(user)
-    await db.flush()
-    return user
+async def deactivate_user(db, user_id: str) -> Optional[User]:
+    await db.db["users"].update_one(
+        {"id": user_id},
+        {"$set": {"deleted_at": datetime.now(timezone.utc), "updated_at": datetime.now(timezone.utc)}}
+    )
+    updated = await db.db["users"].find_one({"id": user_id})
+    return User(**updated) if updated else None
 
-async def deactivate_user(db: AsyncSession, user_id: str) -> Optional[User]:
-    stmt = select(User).where(User.id == user_id)
-    res = await db.execute(stmt)
-    user = res.scalars().first()
-    if not user:
-        return None
-    user.deleted_at = datetime.now(timezone.utc)
-    db.add(user)
-    await db.flush()
-    return user
-
-async def reactivate_user(db: AsyncSession, user_id: str) -> Optional[User]:
-    stmt = select(User).where(User.id == user_id)
-    res = await db.execute(stmt)
-    user = res.scalars().first()
-    if not user:
-        return None
-    user.deleted_at = None
-    db.add(user)
-    await db.flush()
-    return user
+async def reactivate_user(db, user_id: str) -> Optional[User]:
+    await db.db["users"].update_one(
+        {"id": user_id},
+        {"$set": {"deleted_at": None, "updated_at": datetime.now(timezone.utc)}}
+    )
+    updated = await db.db["users"].find_one({"id": user_id})
+    return User(**updated) if updated else None
 
 async def get_platform_settings() -> Dict[str, Any]:
     return _PLATFORM_SETTINGS

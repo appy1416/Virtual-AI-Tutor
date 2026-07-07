@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
 from app.core.database import get_db
@@ -16,7 +15,7 @@ async def list_personalized_recommendations(
     limit: int = Query(10, ge=1, le=50),
     skip: int = Query(0, ge=0),
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     recs, total = await rec_service.get_recommendations(db, current_user.id, limit, skip)
     items = [RecommendationResponse.model_validate(r) for r in recs]
@@ -31,7 +30,7 @@ async def list_personalized_recommendations(
 async def register_recommendation_click_feedback(
     recId: str,
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     updated = await rec_service.mark_recommendation_clicked(db, recId)
     if not updated:

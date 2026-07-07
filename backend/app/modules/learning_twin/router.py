@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, status
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
 from app.core.database import get_db
@@ -14,7 +13,7 @@ router = APIRouter(tags=["Learning Twin"])
 @router.get("/learning-twin")
 async def get_student_twin_profile(
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     profile = await twin_service.get_twin_profile(db, current_user.id)
     return send_response(status_code=status.HTTP_200_OK, success=True, data=LearningTwinResponse.model_validate(profile))
@@ -23,7 +22,7 @@ async def get_student_twin_profile(
 async def update_student_twin_profile(
     body: LearningTwinUpdateRequest,
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     update_data = body.model_dump(exclude_unset=True)
     if "career_goals" in update_data and update_data["career_goals"] is not None:
@@ -35,9 +34,8 @@ async def update_student_twin_profile(
 @router.get("/learning-twin/insights")
 async def get_student_learning_insights(
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
-    # Insights stub (Phase 4 will contain ML models)
     data = {
         "insights": [
             "Your visual recall of diagrams is excellent.",
@@ -49,7 +47,7 @@ async def get_student_learning_insights(
 @router.get("/learning-twin/roadmap")
 async def get_personalized_learning_roadmap(
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     roadmap = await twin_service.generate_learning_roadmap(db, current_user.id)
     return send_response(status_code=status.HTTP_200_OK, success=True, data=roadmap)
@@ -57,7 +55,7 @@ async def get_personalized_learning_roadmap(
 @router.get("/learning-twin/knowledge-gaps")
 async def get_student_knowledge_gaps(
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     gaps = await twin_service.detect_knowledge_gaps(db, current_user.id)
     return send_response(status_code=status.HTTP_200_OK, success=True, data=gaps)
@@ -65,7 +63,7 @@ async def get_student_knowledge_gaps(
 @router.get("/learning-twin/next-review")
 async def get_spaced_repetition_schedule(
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     schedule = await twin_service.get_next_items_to_review(db, current_user.id)
     return send_response(status_code=status.HTTP_200_OK, success=True, data=schedule)

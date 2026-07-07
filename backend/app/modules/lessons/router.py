@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
 
 from app.core.database import get_db
@@ -18,7 +17,7 @@ async def list_course_lessons(
     courseId: str,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     """
     Lists preview elements of lessons for a course, sorted by sequence_order.
@@ -46,7 +45,7 @@ async def create_new_lesson(
     courseId: str,
     body: LessonCreateRequest,
     current_user: User = Depends(RoleChecker(["tutor", "admin"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     """
     Creates a new lesson inside a course. Requires course ownership or admin rights.
@@ -76,10 +75,10 @@ async def create_new_lesson(
 async def get_lesson_details(
     lessonId: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     """
-    Retrieves full details of a specific lesson, including large markdown content blocks.
+    Returns full metadata for a single lesson. Requires course enrollment or tutor/admin role.
     """
     lesson = await lesson_service.get_lesson_full(
         db=db,
@@ -101,37 +100,21 @@ async def update_lesson_details(
     lessonId: str,
     body: LessonUpdateRequest,
     current_user: User = Depends(RoleChecker(["tutor", "admin"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     """
-    Modifies configuration or content parameters of a lesson. Requires course ownership or admin rights.
+    Updates lesson metadata. Requires course ownership or admin rights.
     """
-    # Verify ownership
     lesson = await lesson_crud.get_lesson(db, lessonId)
     if not lesson:
-        return send_response(
-            status_code=status.HTTP_404_NOT_FOUND,
-            success=False,
-            message="Lesson not found."
-        )
+        return send_response(status_code=status.HTTP_404_NOT_FOUND, success=False, message="Lesson not found.")
         
     course = await course_crud.get_course(db, lesson.course_id)
-    if not course:
-         return send_response(
-            status_code=status.HTTP_404_NOT_FOUND,
-            success=False,
-            message="Course associated with lesson not found."
-        )
-        
     if current_user.role != "admin" and course.tutor_id != current_user.id:
-        return send_response(
-            status_code=status.HTTP_403_FORBIDDEN,
-            success=False,
-            message="You do not own the parent course of this lesson."
-        )
+        return send_response(status_code=status.HTTP_403_FORBIDDEN, success=False, message="You do not own this course to modify lessons.")
         
-    update_fields = body.model_dump(exclude_unset=True)
-    updated = await lesson_crud.update_lesson(db, lessonId, **update_fields)
+    fields = body.model_dump(exclude_unset=True)
+    updated = await lesson_crud.update_lesson(db, lessonId, **fields)
     
     from app.modules.lessons.schemas import LessonDetailResponse
     return send_response(
@@ -142,36 +125,21 @@ async def update_lesson_details(
     )
 
 @router.delete("/lessons/{lessonId}")
-async def delete_lesson_record(
+async def delete_lesson(
     lessonId: str,
     current_user: User = Depends(RoleChecker(["tutor", "admin"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     """
-    Soft-deletes a lesson. Requires course ownership or admin rights.
+    Soft deletes a lesson record. Requires course ownership or admin rights.
     """
     lesson = await lesson_crud.get_lesson(db, lessonId)
     if not lesson:
-        return send_response(
-            status_code=status.HTTP_404_NOT_FOUND,
-            success=False,
-            message="Lesson not found."
-        )
+        return send_response(status_code=status.HTTP_404_NOT_FOUND, success=False, message="Lesson not found.")
         
     course = await course_crud.get_course(db, lesson.course_id)
-    if not course:
-         return send_response(
-            status_code=status.HTTP_404_NOT_FOUND,
-            success=False,
-            message="Course associated with lesson not found."
-        )
-        
     if current_user.role != "admin" and course.tutor_id != current_user.id:
-        return send_response(
-            status_code=status.HTTP_403_FORBIDDEN,
-            success=False,
-            message="You do not own the parent course of this lesson."
-        )
+        return send_response(status_code=status.HTTP_403_FORBIDDEN, success=False, message="You do not own this course to delete lessons.")
         
     await lesson_crud.delete_lesson(db, lessonId)
     return send_response(
@@ -184,7 +152,7 @@ async def delete_lesson_record(
 async def mark_lesson_as_complete(
     lessonId: str,
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     """
     Logs lesson completion for the authenticated student.
@@ -201,7 +169,7 @@ async def reorder_course_lessons(
     courseId: str,
     body: LessonReorderRequest,
     current_user: User = Depends(RoleChecker(["tutor", "admin"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     """
     Re-orders sequence allocations for all lessons within a course. Requires course ownership or admin rights.

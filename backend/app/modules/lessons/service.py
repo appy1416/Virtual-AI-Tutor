@@ -1,18 +1,15 @@
 import logging
 from datetime import datetime, timezone
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func
 
 from app.core.exceptions import RoleNotAllowed, EduTwinBaseException
 from app.modules.lessons import crud as lesson_crud
 from app.modules.courses import crud as course_crud
-from app.db.models.lesson import Lesson, LessonCompletion
+from app.db.models.lesson import Lesson
 
 logger = logging.getLogger("edutwin.lessons")
 
 async def create_lesson(
-    db: AsyncSession,
+    db,
     course_id: str,
     tutor_id: str,
     tutor_role: str,
@@ -33,13 +30,11 @@ async def create_lesson(
         raise RoleNotAllowed("You do not own this course to add lessons.")
         
     # 3. Generate sequence order (count + 1)
-    res = await db.execute(
-        select(func.count(Lesson.id)).where(
-            Lesson.course_id == course_id,
-            Lesson.deleted_at == None
-        )
-    )
-    sequence_order = (res.scalar() or 0) + 1
+    lessons_count = await db.db["lessons"].count_documents({
+        "course_id": course_id,
+        "deleted_at": None
+    })
+    sequence_order = lessons_count + 1
     
     # 4. Save
     lesson = await lesson_crud.create_lesson(
@@ -56,7 +51,7 @@ async def create_lesson(
     logger.info("Lesson '%s' created for course %s", title, course_id)
     return lesson
 
-async def get_lesson_full(db: AsyncSession, lesson_id: str, actor_id: str, actor_role: str) -> Lesson:
+async def get_lesson_full(db, lesson_id: str, actor_id: str, actor_role: str) -> Lesson:
     lesson = await lesson_crud.get_lesson(db, lesson_id)
     if not lesson:
         raise EduTwinBaseException("Lesson not found.", status_code=404)
@@ -65,14 +60,13 @@ async def get_lesson_full(db: AsyncSession, lesson_id: str, actor_id: str, actor
     if not course:
         raise EduTwinBaseException("Course for this lesson was not found.", status_code=404)
         
-    # If course is unpublished, only course owner or admin can see it
     if not course.is_published:
         if actor_role != "admin" and course.tutor_id != actor_id:
             raise RoleNotAllowed("This lesson's course is currently unpublished.")
             
     return lesson
 
-async def complete_lesson(db: AsyncSession, user_id: str, lesson_id: str) -> None:
+async def complete_lesson(db, user_id: str, lesson_id: str) -> None:
     # 1. Verify lesson exists
     lesson = await lesson_crud.get_lesson(db, lesson_id)
     if not lesson:
@@ -85,41 +79,37 @@ async def complete_lesson(db: AsyncSession, user_id: str, lesson_id: str) -> Non
     course_id = lesson.course_id
     
     # Total lessons count
-    total_res = await db.execute(
-        select(func.count(Lesson.id)).where(Lesson.course_id == course_id, Lesson.deleted_at == None)
-    )
-    total_count = total_res.scalar() or 0
+    total_count = await db.db["lessons"].count_documents({
+        "course_id": course_id,
+        "deleted_at": None
+    })
     
-    # Completed lessons count
-    comp_res = await db.execute(
-        select(func.count(Lesson.id)).join(
-            LessonCompletion, Lesson.id == LessonCompletion.lesson_id
-        ).where(
-            Lesson.course_id == course_id,
-            Lesson.deleted_at == None,
-            LessonCompletion.user_id == user_id
-        )
-    )
-    completed_count = comp_res.scalar() or 0
+    # Fetch lesson_ids for this course
+    lesson_ids_cursor = db.db["lessons"].find({"course_id": course_id, "deleted_at": None}, {"id": 1})
+    lesson_ids_docs = await lesson_ids_cursor.to_list(length=1000)
+    lesson_ids = [l["id"] for l in lesson_ids_docs]
+    
+    completed_count = 0
+    if lesson_ids:
+        completed_count = await db.db["lesson_completions"].count_documents({
+            "user_id": user_id,
+            "lesson_id": {"$in": lesson_ids}
+        })
     
     if total_count > 0 and completed_count == total_count:
-        # Mark Course completion in UserCourse
-        from app.db.models.user_course import UserCourse
-        from sqlalchemy import update
-        await db.execute(
-            update(UserCourse)
-            .where(UserCourse.user_id == user_id, UserCourse.course_id == course_id)
-            .values(completed_at=datetime.now(timezone.utc) if hasattr(datetime, 'now') else datetime.utcnow()) # fallback import safety
+        await db.db["user_courses"].update_one(
+            {"user_id": user_id, "course_id": course_id},
+            {"$set": {"completed_at": datetime.now(timezone.utc)}}
         )
         logger.info("Student ID %s completed course %s!", user_id, course_id)
         
     logger.info("Lesson completion registered for student ID %s on lesson %s", user_id, lesson_id)
 
-async def get_lesson_progress(db: AsyncSession, user_id: str, lesson_id: str) -> dict:
+async def get_lesson_progress(db, user_id: str, lesson_id: str) -> dict:
     completed = await lesson_crud.is_lesson_completed(db, user_id, lesson_id)
     return {
         "completed": completed,
-        "time_spent_minutes": 15 if completed else 0, # mock statistics
+        "time_spent_minutes": 15 if completed else 0,
         "quiz_score": 90 if completed else None,
         "notes_count": 2 if completed else 0
     }

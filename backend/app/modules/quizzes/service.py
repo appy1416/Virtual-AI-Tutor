@@ -1,4 +1,3 @@
-from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 from difflib import SequenceMatcher
 from datetime import datetime, timezone
@@ -9,6 +8,7 @@ from app.core.exceptions import EduTwinBaseException
 from app.modules.quizzes import crud as quiz_crud
 from app.modules.lessons import crud as lesson_crud
 from app.modules.quizzes.schemas import QuizSubmissionResponse
+from app.db.models.user import User
 
 logger = logging.getLogger("edutwin.quizzes")
 
@@ -16,7 +16,7 @@ def get_string_similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a.strip().lower(), b.strip().lower()).ratio()
 
 async def submit_quiz(
-    db: AsyncSession,
+    db,
     student_id: str,
     quiz_id: str,
     user_answer: str,
@@ -40,7 +40,6 @@ async def submit_quiz(
 
     # 3. Grade response
     if quiz.quiz_type == "mcq":
-        # Options: [{"option_text": "...", "is_correct": bool}]
         correct_option = None
         for opt in (quiz.options or []):
             if opt.get("is_correct") is True:
@@ -71,37 +70,40 @@ async def submit_quiz(
             correct_answer_reveal = target
 
     elif quiz.quiz_type == "essay":
-        # Essay grading is async, delegated to AI stubs
-        is_correct = None  # Essays do not have binary correctness
-        score = 75  # AI stub grade
+        is_correct = None
+        score = 75
         feedback = "Essay response registered. AI Evaluation: Good overview of the concepts. Try to add more concrete examples."
 
     # 4. Gamification points, streaks, and badges calculation
-    from app.db.models.user import User
-    from sqlalchemy.future import select
     from app.utils.lms_helpers import log_activity, create_notification
     
-    user_stmt = select(User).where(User.id == student_id)
-    user_res = await db.execute(user_stmt)
-    user = user_res.scalars().first()
+    user_doc = await db.db["users"].find_one({"id": student_id, "deleted_at": None})
+    user = User(**user_doc) if user_doc else None
     
     points_awarded = 50 if (is_correct is True or score >= 70) else 10
     if user:
-        user.points += points_awarded
+        user.points = getattr(user, "points", 0) + points_awarded
         
         # Streak tracker
         now = datetime.now(timezone.utc)
-        if user.last_activity_date:
-            delta_days = (now.date() - user.last_activity_date.date()).days
+        last_act = user.last_activity_date
+        if last_act:
+            if isinstance(last_act, str):
+                try:
+                    last_act = datetime.fromisoformat(last_act)
+                except Exception:
+                    last_act = None
+            
+        if last_act:
+            delta_days = (now.date() - last_act.date()).days
             if delta_days == 1:
-                user.streak_days += 1
+                user.streak_days = getattr(user, "streak_days", 0) + 1
             elif delta_days > 1:
                 user.streak_days = 1
-            # If delta_days == 0 (same day), streak remains unchanged
         else:
             user.streak_days = 1
             
-        user.last_activity_date = now
+        user.last_activity_date = now.isoformat()
         
         # Badges evaluator
         badges = list(user.badges or [])
@@ -146,7 +148,6 @@ async def submit_quiz(
         notification_type="result"
     )
     
-    # 6. Trigger async logging (Mock or Celery task delay)
     try:
         from app.tasks.analytics_tasks import log_quiz_attempt
         log_quiz_attempt.delay(student_id, quiz_id, score, time_spent_seconds)

@@ -1,96 +1,67 @@
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import update, func
-
+import uuid
+from typing import Optional, List
 from app.db.models.user import User
 
 async def create_user(
-    db: AsyncSession, 
+    db, 
     email: str, 
     hashed_password: str, 
     full_name: str, 
     role: str = "student"
 ) -> User:
-    """
-    Creates and persists a new User model.
-    """
-    db_user = User(
-        email=email,
-        password_hash=hashed_password,
-        full_name=full_name,
-        role=role
-    )
-    db.add(db_user)
-    await db.flush() # Flushes changes to get the auto-generated UUID
-    return db_user
+    user_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    user_doc = {
+        "id": user_id,
+        "email": email.lower(),
+        "password_hash": hashed_password,
+        "full_name": full_name,
+        "role": role,
+        "profile_picture_url": None,
+        "bio": None,
+        "preferences": {},
+        "points": 0,
+        "badges": [],
+        "streak_days": 0,
+        "last_activity_date": None,
+        "created_at": now,
+        "updated_at": now,
+        "deleted_at": None
+    }
+    await db.db["users"].insert_one(user_doc)
+    return User(**user_doc)
 
-async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
-    """
-    Finds a user by email address. Ignores soft-deleted accounts.
-    """
-    result = await db.execute(
-        select(User).where(User.email == email.lower(), User.deleted_at == None)
-    )
-    return result.scalars().first()
+async def get_user_by_email(db, email: str) -> Optional[User]:
+    doc = await db.db["users"].find_one({"email": email.lower(), "deleted_at": None})
+    return User(**doc) if doc else None
 
-async def get_user_by_id(db: AsyncSession, user_id: str) -> Optional[User]:
-    """
-    Finds a user by UUID. Ignores soft-deleted accounts.
-    """
-    result = await db.execute(
-        select(User).where(User.id == user_id, User.deleted_at == None)
-    )
-    return result.scalars().first()
+async def get_user_by_id(db, user_id: str) -> Optional[User]:
+    doc = await db.db["users"].find_one({"id": user_id, "deleted_at": None})
+    return User(**doc) if doc else None
 
-async def update_user(db: AsyncSession, user_id: str, **fields) -> Optional[User]:
-    """
-    Updates designated fields on a user record.
-    """
-    user = await get_user_by_id(db, user_id)
-    if not user:
+async def update_user(db, user_id: str, **fields) -> Optional[User]:
+    doc = await db.db["users"].find_one({"id": user_id, "deleted_at": None})
+    if not doc:
         return None
-        
-    for key, value in fields.items():
-        if hasattr(user, key):
-            setattr(user, key, value)
-            
-    user.updated_at = datetime.now(timezone.utc)
-    db.add(user)
-    await db.flush()
-    return user
+    fields["updated_at"] = datetime.now(timezone.utc)
+    await db.db["users"].update_one({"id": user_id}, {"$set": fields})
+    updated_doc = await db.db["users"].find_one({"id": user_id})
+    return User(**updated_doc) if updated_doc else None
 
-async def delete_user(db: AsyncSession, user_id: str) -> bool:
-    """
-    Performs soft deletion of a user record by assigning `deleted_at`.
-    """
-    user = await get_user_by_id(db, user_id)
-    if not user:
-        return False
-        
-    user.deleted_at = datetime.now(timezone.utc)
-    db.add(user)
-    await db.flush()
-    return True
-
-async def list_users(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[User]:
-    """
-    Lists users with offset/limit pagination parameters. Excludes deleted users.
-    """
-    result = await db.execute(
-        select(User)
-        .where(User.deleted_at == None)
-        .offset(skip)
-        .limit(limit)
-        .order_by(User.created_at.desc())
+async def delete_user(db, user_id: str) -> bool:
+    res = await db.db["users"].update_one(
+        {"id": user_id, "deleted_at": None},
+        {"$set": {"deleted_at": datetime.now(timezone.utc)}}
     )
-    return list(result.scalars().all())
+    return res.modified_count > 0
 
-async def get_user_by_refresh_token(db: AsyncSession, token: str) -> Optional[User]:
-    """
-    Decodes refresh token and retrieves the corresponding User.
-    """
+async def list_users(db, skip: int = 0, limit: int = 100) -> List[User]:
+    cursor = db.db["users"].find({"deleted_at": None}).sort("created_at", -1).skip(skip).limit(limit)
+    docs = await cursor.to_list(length=limit)
+    return [User(**d) for d in docs]
+
+async def get_user_by_refresh_token(db, token: str) -> Optional[User]:
     from app.core.security import verify_token
     try:
         payload = verify_token(token, "refresh")

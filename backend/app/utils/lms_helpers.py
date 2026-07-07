@@ -1,8 +1,7 @@
-from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.activity_log import ActivityLog
 from app.db.models.notification import Notification
 
-async def log_activity(db: AsyncSession, user_id: str, action_type: str, description: str) -> None:
+async def log_activity(db, user_id: str, action_type: str, description: str) -> None:
     """
     Saves an audit activity event log into the database.
     """
@@ -10,7 +9,7 @@ async def log_activity(db: AsyncSession, user_id: str, action_type: str, descrip
     db.add(log)
     await db.flush()
 
-async def create_notification(db: AsyncSession, user_id: str | None, title: str, content: str, notification_type: str) -> None:
+async def create_notification(db, user_id: str | None, title: str, content: str, notification_type: str) -> None:
     """
     Dispatches a student notification or global platform announcement.
     """

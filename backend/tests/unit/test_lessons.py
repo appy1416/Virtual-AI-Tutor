@@ -1,7 +1,6 @@
 import pytest
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from app.core.database import MongoSession
 
 from app.db.models.user import User
 from app.db.models.course import Course
@@ -10,7 +9,7 @@ from app.core.security import create_access_token
 from app.modules.lessons import crud as lesson_crud
 
 @pytest.mark.asyncio
-async def test_create_lesson_sequence_order(client: AsyncClient, db_session: AsyncSession):
+async def test_create_lesson_sequence_order(client: AsyncClient, db_session: MongoSession):
     # Setup tutor and course
     tutor = User(email="tutor5@example.com", password_hash="hash", full_name="Tutor", role="tutor")
     db_session.add(tutor)
@@ -57,7 +56,7 @@ async def test_create_lesson_sequence_order(client: AsyncClient, db_session: Asy
     assert resp2.json()["data"]["sequence_order"] == 2
 
 @pytest.mark.asyncio
-async def test_lesson_completion(client: AsyncClient, db_session: AsyncSession):
+async def test_lesson_completion(client: AsyncClient, db_session: MongoSession):
     # Setup student, course, lesson
     student = User(email="s2@example.com", password_hash="hash", full_name="Student", role="student")
     tutor = User(email="tutor6@example.com", password_hash="hash", full_name="Tutor", role="tutor")
@@ -94,16 +93,14 @@ async def test_lesson_completion(client: AsyncClient, db_session: AsyncSession):
     assert resp.json()["success"] is True
     
     # Assert database log exists
-    res = await db_session.execute(
-        select(LessonCompletion).where(
-            LessonCompletion.user_id == student.id,
-            LessonCompletion.lesson_id == lesson.id
-        )
-    )
-    assert res.scalars().first() is not None
+    completion_doc = await db_session.db["lesson_completions"].find_one({
+        "user_id": student.id,
+        "lesson_id": lesson.id
+    })
+    assert completion_doc is not None
 
 @pytest.mark.asyncio
-async def test_lesson_reordering(client: AsyncClient, db_session: AsyncSession):
+async def test_lesson_reordering(client: AsyncClient, db_session: MongoSession):
     tutor = User(email="tutor7@example.com", password_hash="hash", full_name="Tutor", role="tutor")
     db_session.add(tutor)
     await db_session.commit()
@@ -134,11 +131,8 @@ async def test_lesson_reordering(client: AsyncClient, db_session: AsyncSession):
     assert resp.status_code == 200
     assert resp.json()["success"] is True
     
-    # Refresh from DB and verify sequence orders
-    res1 = await db_session.execute(select(Lesson).where(Lesson.id == l1.id))
-    db_l1 = res1.scalars().first()
-    res2 = await db_session.execute(select(Lesson).where(Lesson.id == l2.id))
-    db_l2 = res2.scalars().first()
+    db_l1_doc = await db_session.db["lessons"].find_one({"id": l1.id})
+    db_l2_doc = await db_session.db["lessons"].find_one({"id": l2.id})
     
-    assert db_l2.sequence_order == 1
-    assert db_l1.sequence_order == 2
+    assert db_l2_doc.get("sequence_order") == 1
+    assert db_l1_doc.get("sequence_order") == 2

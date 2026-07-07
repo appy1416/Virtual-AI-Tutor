@@ -4,15 +4,12 @@ import jwt
 import bcrypt
 from fastapi import Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.db.models.user import User
 from app.core.exceptions import TokenExpired, TokenInvalid, RoleNotAllowed, UserNotFound
 
-# JWT token bearer authentication handler
 security_scheme = HTTPBearer()
 
 def hash_password(password: str) -> str:
@@ -44,46 +41,30 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         expire = datetime.now(timezone.utc) + expires_delta
     else:
         expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    
     token_type = to_encode.get("type", "access")
-    to_encode.update({
-        "exp": expire,
-        "type": token_type
-    })
+    to_encode.update({"exp": expire, "type": token_type})
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
-def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def create_refresh_token(data: dict) -> str:
     """
-    Creates a JWT refresh token with longer duration for session extension.
+    Creates a long-lived JWT refresh token.
     """
     to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-        
-    to_encode.update({
-        "exp": expire,
-        "type": "refresh"
-    })
+    expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    to_encode.update({"exp": expire, "type": "refresh"})
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
 def verify_token(token: str, expected_type: str = "access") -> dict:
     """
-    Decodes and validates a JWT token. Handles expired or malformed tokens.
+    Verifies JWT token integrity and validates payload parameters.
     """
     try:
-        payload = jwt.decode(
-            token, 
-            settings.SECRET_KEY, 
-            algorithms=[settings.ALGORITHM]
-        )
-        # Validate type
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         token_type = payload.get("type")
         if token_type != expected_type:
-            raise TokenInvalid(f"Invalid token type. Expected: {expected_type}")
+            raise TokenInvalid(f"Token type mismatch. Expected: {expected_type}, Found: {token_type}")
         return payload
     except jwt.ExpiredSignatureError:
         raise TokenExpired()
@@ -92,7 +73,7 @@ def verify_token(token: str, expected_type: str = "access") -> dict:
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ) -> User:
     """
     FastAPI dependency that extracts JWT from request header, verifies it,
@@ -104,16 +85,11 @@ async def get_current_user(
     if not user_id:
         raise TokenInvalid("Subject (sub) claim missing from token.")
         
-    # Query database for user
-    result = await db.execute(
-        select(User).where(User.id == user_id, User.deleted_at == None)
-    )
-    user = result.scalars().first()
-    
-    if not user:
+    user_doc = await db.db["users"].find_one({"id": user_id, "deleted_at": None})
+    if not user_doc:
         raise UserNotFound("Authenticated user not found or has been deleted.")
         
-    return user
+    return User(**user_doc)
 
 class RoleChecker:
     """

@@ -1,6 +1,3 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func
 from typing import List, Dict, Any
 
 from app.db.models.analytics import StudentPerformance
@@ -8,49 +5,47 @@ from app.db.models.user_course import UserCourse
 from app.db.models.course import Course
 from app.db.models.lesson import Lesson
 
-async def simple_recommendation_engine(student_id: str, db: AsyncSession) -> List[Dict[str, Any]]:
+async def simple_recommendation_engine(student_id: str, db) -> List[Dict[str, Any]]:
     # 1. Get student's weak performance records (score < 70)
-    stmt_weak = select(StudentPerformance).where(
-        StudentPerformance.student_id == student_id,
-        StudentPerformance.score < 70
-    )
-    res_weak = await db.execute(stmt_weak)
-    weak_records = res_weak.scalars().all()
+    cursor_weak = db.db["student_performances"].find({
+        "student_id": student_id,
+        "score": {"$lt": 70}
+    })
+    weak_docs = await cursor_weak.to_list(length=1000)
+    weak_records = [StudentPerformance(**w) for w in weak_docs]
     
     # Map lesson_id -> score
     weak_lessons = {w.lesson_id: w.score for w in weak_records}
     
     # 2. Get student's active enrollments to exclude
-    stmt_enrolled = select(UserCourse.course_id).where(UserCourse.user_id == student_id)
-    res_enrolled = await db.execute(stmt_enrolled)
-    enrolled_course_ids = set(res_enrolled.scalars().all())
+    cursor_enrolled = db.db["user_courses"].find({"user_id": student_id})
+    enrolled_docs = await cursor_enrolled.to_list(length=1000)
+    enrolled_course_ids = set(e["course_id"] for e in enrolled_docs)
 
     recommendations = []
 
     # 3. Heuristic Course Recommendation
     # Find courses that are published, that the student is NOT enrolled in.
-    stmt_courses = select(Course).where(
-        Course.is_published == True,
-        Course.deleted_at == None
-    )
-    res_courses = await db.execute(stmt_courses)
-    all_courses = res_courses.scalars().all()
+    cursor_courses = db.db["courses"].find({
+        "is_published": True,
+        "deleted_at": None
+    })
+    courses_docs = await cursor_courses.to_list(length=1000)
+    all_courses = [Course(**c) for c in courses_docs]
     
     for course in all_courses:
         if course.id in enrolled_course_ids:
             continue
             
-        # Score calculation: if tutor matches student's interests or course is general.
-        # If student has a weakness in a topic that matches the course category, boost score.
         relevance_score = 60  # baseline
         reason = f"Explore new horizons in {course.category}."
         
         # Check category match with weak lesson categories
         if weak_lessons:
             # Join lessons for this course to see if any matches weak area
-            stmt_course_lessons = select(Lesson.id).where(Lesson.course_id == course.id, Lesson.deleted_at == None)
-            res_cl = await db.execute(stmt_course_lessons)
-            cl_ids = res_cl.scalars().all()
+            cursor_cl = db.db["lessons"].find({"course_id": course.id, "deleted_at": None}, {"id": 1})
+            cl_docs = await cursor_cl.to_list(length=1000)
+            cl_ids = [l["id"] for l in cl_docs]
             
             overlap = [cl_id for cl_id in cl_ids if cl_id in weak_lessons]
             if overlap:

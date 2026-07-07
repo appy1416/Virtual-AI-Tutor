@@ -1,9 +1,8 @@
 from fastapi import APIRouter, Depends, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import security_scheme, HTTPAuthorizationCredentials
+from app.core.security import security_scheme, HTTPAuthorizationCredentials, verify_token
 from app.modules.auth import service
 from app.modules.auth.schemas import (
     RegisterRequest, 
@@ -12,11 +11,12 @@ from app.modules.auth.schemas import (
     PasswordResetConfirm
 )
 from app.utils.response import send_response
+from app.utils.lms_helpers import log_activity
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(body: RegisterRequest, db = Depends(get_db)):
     """
     Registers a new student account.
     """
@@ -35,7 +35,7 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     )
 
 @router.post("/login")
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(body: LoginRequest, db = Depends(get_db)):
     """
     Authenticates a user using email and password, returning tokens.
     """
@@ -59,12 +59,11 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 @router.post("/oauth-login")
 async def oauth_login(
     form_data: OAuth2PasswordRequestForm = Depends(), 
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     """
     Standard OAuth2 password flow login (for Swagger UI authorization compatibility).
     """
-    # form_data.username represents email
     access_token, refresh_token, user_data = await service.login_user(
         db=db, 
         email=form_data.username, 
@@ -76,16 +75,11 @@ async def oauth_login(
         "token_type": "bearer"
     }
 
-from app.core.security import security_scheme, HTTPAuthorizationCredentials, verify_token
-from app.utils.lms_helpers import log_activity
-
-# ... (rest of imports and router initialization) ...
-
 @router.post("/logout")
 async def logout(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     """
     Logs out the active user and revokes the bearer token.
@@ -107,7 +101,7 @@ async def logout(
     )
 
 @router.post("/refresh")
-async def refresh(request: Request, db: AsyncSession = Depends(get_db)):
+async def refresh(request: Request, db = Depends(get_db)):
     """
     Retrieves a new access token using the supplied refresh_token.
     """
@@ -148,7 +142,7 @@ async def refresh(request: Request, db: AsyncSession = Depends(get_db)):
         )
 
 @router.post("/forgot-password")
-async def forgot_password(body: PasswordResetRequest, db: AsyncSession = Depends(get_db)):
+async def forgot_password(body: PasswordResetRequest, db = Depends(get_db)):
     """
     Initiates the password reset workflow by generating a token and writing to logs.
     """
@@ -160,7 +154,7 @@ async def forgot_password(body: PasswordResetRequest, db: AsyncSession = Depends
     )
 
 @router.post("/reset-password")
-async def reset_password_route(body: PasswordResetConfirm, db: AsyncSession = Depends(get_db)):
+async def reset_password_route(body: PasswordResetConfirm, db = Depends(get_db)):
     """
     Completes the password reset process using the reset token.
     """

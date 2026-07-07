@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, status, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 
 from app.core.database import get_db
@@ -17,7 +16,7 @@ router = APIRouter(tags=["Chat"])
 async def start_new_session(
     body: ChatSessionStartRequest,
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     sess = await chat_service.start_chat_session(
         db=db,
@@ -32,7 +31,7 @@ async def list_user_sessions(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     sessions, total = await chat_crud.list_chat_sessions(db, current_user.id, skip, limit)
     
@@ -48,7 +47,7 @@ async def send_chat_message(
     sessionId: str,
     body: ChatMessageRequest,
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     sess = await chat_crud.get_chat_session(db, sessionId)
     if not sess:
@@ -64,7 +63,7 @@ async def send_chat_message(
 async def get_session_history_list(
     sessionId: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     sess = await chat_crud.get_chat_session(db, sessionId)
     if not sess:
@@ -87,7 +86,7 @@ async def get_session_history_list(
 async def close_session_record(
     sessionId: str,
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     sess = await chat_crud.get_chat_session(db, sessionId)
     if not sess:
@@ -103,7 +102,7 @@ async def close_session_record(
 async def search_past_conversations(
     q: str = Query(""),
     current_user: User = Depends(RoleChecker(["student"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     matched_sessions = await chat_service.search_chat_history(db, current_user.id, q)
     items = [ChatSessionResponse.model_validate(s) for s in matched_sessions]
@@ -115,9 +114,7 @@ async def websocket_chat_endpoint(websocket: WebSocket, sessionId: str):
     await manager.connect(sessionId, websocket)
     try:
         while True:
-            # Simple text echo loop for this phase (real logic integrated in Phase 6)
             data = await websocket.receive_text()
-            # Send back personalized reply echo stub
             reply = f"WebSocket Echo response to: {data}"
             await manager.send_personal_message(reply, websocket)
     except WebSocketDisconnect:

@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 
 from app.core.database import get_db
@@ -23,11 +22,10 @@ async def list_users_for_admin(
     limit: int = Query(50, ge=1, le=100),
     role: Optional[str] = None,
     current_user: User = Depends(RoleChecker(["admin"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     users, total = await admin_service.get_users(db, skip, limit, role)
     
-    # Calculate page count
     page_count = (total + limit - 1) // limit if limit > 0 else 0
     
     data = {
@@ -41,7 +39,7 @@ async def list_users_for_admin(
 async def get_user_details_for_admin(
     userId: str,
     current_user: User = Depends(RoleChecker(["admin"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     details = await admin_service.get_user_details(db, userId)
     if not details:
@@ -54,7 +52,7 @@ async def change_user_role_by_admin(
     userId: str,
     body: AdminRoleUpdateRequest,
     current_user: User = Depends(RoleChecker(["admin"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     updated = await admin_service.change_user_role(db, userId, body.role)
     if not updated:
@@ -75,7 +73,7 @@ async def change_user_role_by_admin(
 async def deactivate_user_by_admin(
     userId: str,
     current_user: User = Depends(RoleChecker(["admin"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     if userId == current_user.id:
         return send_response(status_code=status.HTTP_400_BAD_REQUEST, success=False, message="You cannot deactivate your own admin account.")
@@ -90,7 +88,7 @@ async def deactivate_user_by_admin(
 async def reactivate_user_by_admin(
     userId: str,
     current_user: User = Depends(RoleChecker(["admin"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     updated = await admin_service.reactivate_user(db, userId)
     if not updated:
@@ -120,7 +118,7 @@ async def update_platform_settings_by_admin(
 async def send_platform_announcement(
     body: AdminAnnouncementRequest,
     current_user: User = Depends(RoleChecker(["admin"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     res = await admin_service.send_announcement(db, body.title, body.content)
     return send_response(status_code=status.HTTP_200_OK, success=True, data=res, message="Announcement broadcasted successfully.")
@@ -128,7 +126,7 @@ async def send_platform_announcement(
 @router.get("/admin/stats")
 async def get_platform_wide_statistics(
     current_user: User = Depends(RoleChecker(["admin"])),
-    db: AsyncSession = Depends(get_db)
+    db = Depends(get_db)
 ):
     stats = await admin_service.get_platform_stats(db)
     return send_response(status_code=status.HTTP_200_OK, success=True, data=stats)
@@ -137,7 +135,6 @@ async def get_platform_wide_statistics(
 async def generate_platform_reports(
     current_user: User = Depends(RoleChecker(["admin"]))
 ):
-    # Mock download report structure
     return send_response(status_code=status.HTTP_200_OK, success=True, data={"report_url": "/storage/reports/weekly_report.pdf"})
 
 @router.post("/admin/export-data")
