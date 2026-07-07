@@ -16,6 +16,7 @@ from app.modules.quizzes.schemas import (
     QuizSubmissionResponse
 )
 from app.utils.response import send_response
+from app.utils.lms_helpers import create_notification
 
 router = APIRouter(tags=["Quizzes"])
 
@@ -44,7 +45,8 @@ async def list_lesson_quizzes(
             "options": stripped_options,
             "difficulty_level": q.difficulty_level,
             "max_attempts": q.max_attempts,
-            "time_limit_seconds": q.time_limit_seconds
+            "time_limit_seconds": q.time_limit_seconds,
+            "negative_marking": getattr(q, "negative_marking", 0.0)
         })
 
     data = {
@@ -91,8 +93,20 @@ async def create_lesson_quiz(
         explanation=body.explanation,
         is_published=body.is_published,
         available_from=body.available_from,
-        available_until=body.available_until
+        available_until=body.available_until,
+        negative_marking=body.negative_marking or 0.0
     )
+
+    # Broadcast notification to all students if published
+    if body.is_published:
+        await create_notification(
+            db=db,
+            user_id=None,
+            title="New Quiz Released!",
+            content=f"A new quiz has been published for lesson '{lesson.title}' in course '{course.title}'.",
+            notification_type="quiz"
+        )
+
     return send_response(
         status_code=status.HTTP_201_CREATED,
         success=True,
@@ -233,20 +247,50 @@ async def get_quiz_global_stats(
     current_user: User = Depends(RoleChecker(["tutor", "admin"])),
     db = Depends(get_db)
 ):
-    # Fetch performance stats for all attempts
-    # Calculate average score and total attempts in MongoDB
-    pipeline = [
-        {"$match": {"quiz_id": quizId}},
-        {"$group": {"_id": "$quiz_id", "avg_score": {"$avg": "$score"}, "count": {"$sum": 1}}}
-    ]
-    cursor = db.db["student_performances"].aggregate(pipeline)
-    res = await cursor.to_list(length=1)
+    # Fetch all attempts from quiz_answers
+    attempts = await db.db["quiz_answers"].find({"quiz_id": quizId}).to_list(length=10000)
+    if not attempts:
+        data = {
+            "average_score": 0.0,
+            "highest_score": 0.0,
+            "lowest_score": 0.0,
+            "completion_rate": 0.0,
+            "total_attempts": 0
+        }
+        return send_response(status_code=status.HTTP_200_OK, success=True, data=data)
+        
+    quiz = await db.db["quizzes"].find_one({"id": quizId})
+    penalty = float(quiz.get("negative_marking") or 0.0) if quiz else 0.0
     
-    avg_score = res[0]["avg_score"] if res else 0.0
-    total_attempts = res[0]["count"] if res else 0
+    scores = []
+    for a in attempts:
+        if a.get("is_correct") is True:
+            scores.append(100.0)
+        else:
+            # MCQs/Short answers have penalty score if wrong
+            scores.append(-penalty * 100.0)
+            
+    avg_score = sum(scores) / len(scores) if scores else 0.0
+    highest_score = max(scores) if scores else 0.0
+    lowest_score = min(scores) if scores else 0.0
+    
+    # Calculate Completion Rate
+    lesson_id = quiz.get("lesson_id") if quiz else None
+    lesson = await db.db["lessons"].find_one({"id": lesson_id}) if lesson_id else None
+    course_id = lesson.get("course_id") if lesson else None
+    
+    total_enrolled = 0
+    if course_id:
+        total_enrolled = await db.db["user_courses"].count_documents({"course_id": course_id})
+        
+    unique_students = len(set(a.get("student_id") for a in attempts))
+    completion_rate = round((unique_students / total_enrolled) * 100, 1) if total_enrolled > 0 else 0.0
     
     data = {
-        "average_score": round(avg_score or 0.0, 1),
-        "total_attempts": total_attempts or 0
+        "average_score": round(avg_score, 1),
+        "highest_score": round(highest_score, 1),
+        "lowest_score": round(lowest_score, 1),
+        "completion_rate": completion_rate,
+        "total_attempts": len(attempts)
     }
     return send_response(status_code=status.HTTP_200_OK, success=True, data=data)

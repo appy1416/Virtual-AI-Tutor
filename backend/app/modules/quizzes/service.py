@@ -39,6 +39,7 @@ async def submit_quiz(
     correct_answer_reveal = None
 
     # 3. Grade response
+    penalty = float(getattr(quiz, "negative_marking", 0.0) or 0.0)
     if quiz.quiz_type == "mcq":
         correct_option = None
         for opt in (quiz.options or []):
@@ -52,7 +53,7 @@ async def submit_quiz(
             feedback = "Correct! Well done."
         else:
             is_correct = False
-            score = 0
+            score = -int(penalty * 100) if penalty > 0 else 0
             feedback = f"Incorrect response. Focus on the core definitions."
             correct_answer_reveal = correct_option
 
@@ -65,7 +66,7 @@ async def submit_quiz(
             feedback = f"Correct! (Matches correct answer with {sim*100:.1f}% similarity)"
         else:
             is_correct = False
-            score = 0
+            score = -int(penalty * 100) if penalty > 0 else 0
             feedback = "Incorrect answer. Re-read the lesson and try again."
             correct_answer_reveal = target
 
@@ -80,9 +81,9 @@ async def submit_quiz(
     user_doc = await db.db["users"].find_one({"id": student_id, "deleted_at": None})
     user = User(**user_doc) if user_doc else None
     
-    points_awarded = 50 if (is_correct is True or score >= 70) else 10
+    points_awarded = 50 if (is_correct is True or score >= 70) else (-int(penalty * 10) if penalty > 0 else 10)
     if user:
-        user.points = getattr(user, "points", 0) + points_awarded
+        user.points = max(0, getattr(user, "points", 0) + points_awarded)
         
         # Streak tracker
         now = datetime.now(timezone.utc)

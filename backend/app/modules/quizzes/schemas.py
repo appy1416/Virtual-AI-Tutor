@@ -20,6 +20,7 @@ class QuizCreateRequest(BaseModel):
     is_published: Optional[bool] = True
     available_from: Optional[datetime] = None
     available_until: Optional[datetime] = None
+    negative_marking: Optional[float] = 0.0
 
 class QuizUpdateRequest(BaseModel):
     question_text: Optional[str] = None
@@ -34,6 +35,7 @@ class QuizUpdateRequest(BaseModel):
     is_published: Optional[bool] = None
     available_from: Optional[datetime] = None
     available_until: Optional[datetime] = None
+    negative_marking: Optional[float] = None
 
 class QuizResponse(BaseModel):
     id: str
@@ -48,6 +50,7 @@ class QuizResponse(BaseModel):
     is_published: bool
     available_from: Optional[datetime] = None
     available_until: Optional[datetime] = None
+    negative_marking: Optional[float] = 0.0
 
     class Config:
         from_attributes = True

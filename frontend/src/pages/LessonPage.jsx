@@ -31,13 +31,30 @@ const LessonPage = () => {
   const [chatInput, setChatInput] = useState('');
   const [sendingMsg, setSendingMsg] = useState(false);
 
-  // Tab State: 'content', 'notes', 'chat'
+  // Handouts State
+  const [handouts, setHandouts] = useState([]);
+  const [loadingHandouts, setLoadingHandouts] = useState(false);
+
+  // Tab State: 'content', 'notes', 'chat', 'handouts'
   const [activeTab, setActiveTab] = useState('content');
+
+  const fetchHandouts = async () => {
+    setLoadingHandouts(true);
+    try {
+      const res = await api.get(`/lms-notes?lesson_id=${lessonId}`);
+      setHandouts(res.data?.data || []);
+    } catch (e) {
+      // Ignored
+    } finally {
+      setLoadingHandouts(false);
+    }
+  };
 
   useEffect(() => {
     fetchLesson();
     fetchOrCreateNote();
     fetchOrCreateChatSession();
+    fetchHandouts();
   }, [lessonId]);
 
   const fetchOrCreateNote = async () => {
@@ -108,7 +125,6 @@ const LessonPage = () => {
     try {
       const res = await api.post(`/chat/${chatSessionId}/message`, { message: userMsg });
       const { user_message, ai_response } = res.data.data;
-      // Replace last messages or just append the actual objects
       setChatMessages(prev => [
         ...prev.filter(m => m.content !== userMsg),
         user_message,
@@ -226,7 +242,18 @@ const LessonPage = () => {
           >
             <span className="inline-flex items-center space-x-1">
               <MessageSquare className="h-4 w-4" />
-              <span>AI Tutor Chat</span>
+              <span>AI Tutor</span>
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab('handouts')}
+            className={`flex-1 py-3 text-center text-xs font-bold border-b-2 transition cursor-pointer ${
+              activeTab === 'handouts' ? 'border-brand-500 text-brand-400' : 'border-transparent text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            <span className="inline-flex items-center space-x-1">
+              <BookOpen className="h-4 w-4" />
+              <span>Handouts</span>
             </span>
           </button>
         </div>
@@ -279,7 +306,6 @@ const LessonPage = () => {
         {/* Tab Content: Chat */}
         {activeTab === 'chat' && (
           <div className="glass rounded-2xl flex flex-col h-[400px] border border-slate-800/80">
-            {/* Scrollable Dialogue List */}
             <div className="flex-1 p-4 overflow-y-auto space-y-3">
               {chatMessages.length > 0 ? (
                 chatMessages.map((msg, i) => (
@@ -303,7 +329,6 @@ const LessonPage = () => {
               )}
             </div>
 
-            {/* Input Bar */}
             <div className="p-3 border-t border-slate-900 flex items-center space-x-2">
               <input
                 type="text"
@@ -321,6 +346,61 @@ const LessonPage = () => {
                 <Send className="h-4.5 w-4.5" />
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Tab Content: Handouts */}
+        {activeTab === 'handouts' && (
+          <div className="glass p-5 rounded-2xl space-y-4">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Lesson handouts</h4>
+            {loadingHandouts ? (
+              <div className="flex h-20 items-center justify-center">
+                <div className="h-5 w-5 animate-spin rounded-full border-4 border-brand-500 border-t-transparent"></div>
+              </div>
+            ) : handouts.length > 0 ? (
+              <div className="space-y-3">
+                {handouts.map((h) => {
+                  const getDownloadUrl = (noteId) => {
+                    const base = api.defaults.baseURL || 'https://virtual-ai-tutor-tqet.onrender.com/api/v1';
+                    return `${base}/lms-notes/${noteId}/file`;
+                  };
+                  return (
+                    <div key={h.id} className="p-3.5 rounded-xl bg-slate-900 border border-slate-850 space-y-2 text-xs">
+                      <div className="flex justify-between items-start gap-1">
+                        <span className="font-bold text-slate-200 line-clamp-1">{h.title}</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-brand-500/10 text-brand-400 uppercase shrink-0">
+                          {h.file_type}
+                        </span>
+                      </div>
+                      <p className="text-slate-400 text-[11px] leading-relaxed">{h.description}</p>
+                      
+                      <div className="flex gap-2 mt-2 pt-2 border-t border-slate-950">
+                        {h.file_type.toLowerCase() === 'pdf' && (
+                          <button
+                            onClick={() => window.open(getDownloadUrl(h.id), '_blank')}
+                            className="flex-1 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-900 border border-slate-800 text-[10px] font-bold text-slate-400 hover:text-slate-300 transition flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            <span>Preview</span>
+                          </button>
+                        )}
+                        <a
+                          href={getDownloadUrl(h.id)}
+                          download
+                          onClick={() => setTimeout(() => fetchHandouts(), 1000)}
+                          className="flex-1 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-[10px] font-bold text-white transition flex items-center justify-center gap-1 text-center"
+                        >
+                          <span>Get File</span>
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-slate-500 text-xs">
+                No handouts published for this lesson yet.
+              </div>
+            )}
           </div>
         )}
       </div>

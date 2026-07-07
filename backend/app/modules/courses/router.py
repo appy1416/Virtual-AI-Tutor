@@ -8,6 +8,7 @@ from app.modules.courses import service as course_service
 from app.modules.courses import crud as course_crud
 from app.modules.courses.schemas import CourseCreateRequest, CourseUpdateRequest
 from app.utils.response import send_response
+from app.utils.lms_helpers import create_notification
 
 router = APIRouter(prefix="/courses", tags=["Courses"])
 
@@ -66,6 +67,15 @@ async def create_new_course(
         level=body.level,
         thumbnail_url=body.thumbnail_url,
         max_students=body.max_students
+    )
+    
+    # Broadcast notification to all students
+    await create_notification(
+        db=db,
+        user_id=None,
+        title="New Course Available!",
+        content=f"Course '{body.title}' is now available. Enroll now!",
+        notification_type="course"
     )
     
     from app.modules.courses.schemas import CourseResponse

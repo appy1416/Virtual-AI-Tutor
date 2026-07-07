@@ -9,6 +9,9 @@ class LMSNoteCreate(BaseModel):
     file_name: str
     file_url: str
     file_type: str
+    course_id: Optional[str] = None
+    lesson_id: Optional[str] = None
+    file_size: Optional[int] = 0
 
 class LMSNoteResponse(BaseModel):
     id: str
@@ -19,6 +22,10 @@ class LMSNoteResponse(BaseModel):
     file_url: str
     file_type: str
     uploaded_by: str
+    course_id: Optional[str] = None
+    lesson_id: Optional[str] = None
+    file_size: Optional[int] = 0
+    download_count: Optional[int] = 0
     created_at: datetime
     updated_at: datetime
 

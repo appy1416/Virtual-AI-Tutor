@@ -8,6 +8,8 @@ class AssignmentCreate(BaseModel):
     deadline: datetime
     file_url: Optional[str] = None
     is_published: Optional[bool] = True
+    course_ids: Optional[List[str]] = []
+    max_marks: Optional[int] = 100
 
 class AssignmentUpdate(BaseModel):
     title: Optional[str] = None
@@ -15,6 +17,8 @@ class AssignmentUpdate(BaseModel):
     deadline: Optional[datetime] = None
     file_url: Optional[str] = None
     is_published: Optional[bool] = None
+    course_ids: Optional[List[str]] = None
+    max_marks: Optional[int] = None
 
 class AssignmentResponse(BaseModel):
     id: str
@@ -23,6 +27,8 @@ class AssignmentResponse(BaseModel):
     deadline: datetime
     file_url: Optional[str] = None
     is_published: bool
+    course_ids: Optional[List[str]] = []
+    max_marks: Optional[int] = 100
     created_at: datetime
     updated_at: datetime
 

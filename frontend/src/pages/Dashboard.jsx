@@ -14,9 +14,11 @@ import {
   Download,
   Upload,
   Calendar,
-  AlertCircle
+  AlertCircle,
+  FileText,
+  Eye
 } from 'lucide-react';
-import api, { getFileUrl } from '../config/api';
+import api from '../config/api';
 import { useApi } from '../hooks/useApi';
 import { AuthContext } from '../context/AuthContext';
 
@@ -28,6 +30,7 @@ const Dashboard = () => {
   const { data: assignments, call: fetchAssignments } = useApi(() => api.get('/assignments'));
   const { data: sharedNotes, call: fetchSharedNotes } = useApi(() => api.get('/lms-notes'));
   const { data: notifications, call: fetchNotifications } = useApi(() => api.get('/notifications'));
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
 
   // Submission Form State
   const [selectedAssignment, setSelectedAssignment] = useState(null);
@@ -40,12 +43,22 @@ const Dashboard = () => {
   // Notifications Panel State
   const [showNotifications, setShowNotifications] = useState(false);
 
+  const fetchUnreadCount = async () => {
+    try {
+      const res = await api.get('/notifications/unread-count');
+      setUnreadNotifCount(res.data?.data?.unread_count || 0);
+    } catch (e) {
+      // Ignored
+    }
+  };
+
   useEffect(() => {
     fetchDashboard();
     fetchRecs();
     fetchAssignments();
     fetchSharedNotes();
     fetchNotifications();
+    fetchUnreadCount();
   }, []);
 
   const metrics = dashboard || {
@@ -72,6 +85,8 @@ const Dashboard = () => {
 
     try {
       setSubmitting(true);
+      setErrorMsg('');
+      setSuccessMsg('');
       const res = await api.post('/assignments/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
@@ -125,6 +140,17 @@ const Dashboard = () => {
     try {
       await api.post(`/notifications/${id}/read`);
       fetchNotifications();
+      fetchUnreadCount();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleMarkAllRead = async () => {
+    try {
+      await api.post('/notifications/read-all');
+      fetchNotifications();
+      fetchUnreadCount();
     } catch (err) {
       console.error(err);
     }
@@ -140,11 +166,13 @@ const Dashboard = () => {
         <div className="relative">
           <button 
             onClick={() => setShowNotifications(!showNotifications)}
-            className="p-3 rounded-full bg-slate-900 border border-slate-800 hover:border-brand-500/50 hover:text-white transition flex items-center justify-center cursor-pointer"
+            className="p-3 rounded-full bg-slate-900 border border-slate-800 hover:border-brand-500/50 hover:text-white transition flex items-center justify-center cursor-pointer relative"
           >
             <Bell className="h-5 w-5 text-slate-400" />
-            {notificationItems.filter(n => !n.is_read).length > 0 && (
-              <span className="absolute top-1 right-1 h-3 w-3 rounded-full bg-brand-500 animate-pulse" />
+            {unreadNotifCount > 0 && (
+              <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-brand-500 text-white font-bold text-[9px] flex items-center justify-center animate-pulse">
+                {unreadNotifCount}
+              </span>
             )}
           </button>
 
@@ -152,9 +180,17 @@ const Dashboard = () => {
             <div className="absolute right-0 mt-3 w-80 glass border border-slate-800 rounded-2xl shadow-xl z-50 p-4 space-y-3">
               <div className="flex justify-between items-center pb-2 border-b border-slate-800">
                 <span className="font-bold text-sm text-slate-200">Alert Center</span>
-                <span className="text-[10px] text-brand-400 font-bold uppercase">
-                  {notificationItems.filter(n => !n.is_read).length} New
-                </span>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={handleMarkAllRead}
+                    className="text-[10px] font-bold text-brand-400 hover:text-brand-300 transition cursor-pointer"
+                  >
+                    Mark all read
+                  </button>
+                  <span className="text-[10px] text-slate-500 font-bold">
+                    ({unreadNotifCount})
+                  </span>
+                </div>
               </div>
               <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
                 {notificationItems.length > 0 ? (
@@ -319,9 +355,28 @@ const Dashboard = () => {
                       <p className="text-[10px] text-red-400 font-semibold flex items-center gap-1">
                         <span>Deadline: {new Date(a.deadline).toLocaleDateString()} {new Date(a.deadline).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                       </p>
+                      {a.submitted_file_url && (
+                        <div className="mt-2 text-[10px] text-slate-400 flex items-center gap-1.5">
+                          <span>Your Submission:</span>
+                          <a 
+                            href={`${api.defaults.baseURL || 'https://virtual-ai-tutor-tqet.onrender.com/api/v1'}/submissions/${a.submission_id}/file`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-brand-400 hover:underline font-bold flex items-center gap-1"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                            <span>{a.submitted_file_name || 'Download Solution'}</span>
+                          </a>
+                        </div>
+                      )}
+                      {a.submission_text && (
+                        <div className="mt-1 text-[11px] text-slate-500 italic">
+                          Comments: "{a.submission_text}"
+                        </div>
+                      )}
                       {a.feedback && (
                         <div className="mt-2 p-2 rounded bg-slate-900 border border-slate-800 text-[11px] text-brand-300">
-                          <strong>Feedback:</strong> {a.feedback}
+                          <strong>Remarks:</strong> {a.feedback}
                         </div>
                       )}
                     </div>
@@ -329,10 +384,9 @@ const Dashboard = () => {
                     <div className="flex items-center space-x-2 shrink-0">
                       {a.file_url && (
                         <a 
-                          href={getFileUrl(a.file_url)} 
-                          target="_blank" 
-                          rel="noreferrer"
-                          className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 hover:text-white text-slate-400 transition"
+                          href={`${api.defaults.baseURL || 'https://virtual-ai-tutor-tqet.onrender.com/api/v1'}/assignments/${a.id}/file`}
+                          download
+                          className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 hover:text-white text-slate-400 transition cursor-pointer"
                           title="Download Assignment Sheet"
                         >
                           <Download className="h-4 w-4" />
@@ -374,15 +428,26 @@ const Dashboard = () => {
                       <p className="text-xs text-slate-400 leading-normal line-clamp-2">{n.description}</p>
                     </div>
 
-                    <a 
-                      href={getFileUrl(n.file_url)} 
-                      target="_blank" 
-                      rel="noreferrer"
-                      className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 hover:text-white text-slate-400 transition shrink-0 mt-1"
-                      title="Download Study Sheet"
-                    >
-                      <Download className="h-4 w-4" />
-                    </a>
+                    <div className="flex items-center gap-1.5 shrink-0 mt-1">
+                      {n.file_type?.toLowerCase() === 'pdf' && (
+                        <button 
+                          onClick={() => window.open(`${api.defaults.baseURL || 'https://virtual-ai-tutor-tqet.onrender.com/api/v1'}/lms-notes/${n.id}/file`, '_blank')}
+                          className="p-2 rounded-lg bg-slate-900 border border-slate-800 hover:text-white text-slate-400 transition"
+                          title="Preview Handout"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      <a 
+                        href={`${api.defaults.baseURL || 'https://virtual-ai-tutor-tqet.onrender.com/api/v1'}/lms-notes/${n.id}/file`} 
+                        download
+                        onClick={() => setTimeout(() => fetchSharedNotes(), 1000)}
+                        className="p-2 rounded-lg bg-slate-900 border border-slate-800 hover:text-white text-slate-400 transition"
+                        title="Download Study Sheet"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </a>
+                    </div>
                   </div>
                 ))
               ) : (

@@ -16,9 +16,10 @@ import {
   Eye, 
   Clock, 
   FileSpreadsheet,
-  Check
+  Check,
+  HelpCircle
 } from 'lucide-react';
-import api, { getFileUrl } from '../config/api';
+import api from '../config/api';
 import { useApi } from '../hooks/useApi';
 
 // Chart.js imports
@@ -59,6 +60,7 @@ const AdminDashboard = () => {
   // State Management
   const [searchTerm, setSearchTerm] = useState('');
   const [updatingUserId, setUpdatingUserId] = useState(null);
+  const [courses, setCourses] = useState([]);
 
   // Forms State
   // 1. Study Notes
@@ -66,12 +68,17 @@ const AdminDashboard = () => {
   const [noteDesc, setNoteDesc] = useState('');
   const [noteSubject, setNoteSubject] = useState('');
   const [uploadedNoteFile, setUploadedNoteFile] = useState(null);
+  const [selectedCourseId, setSelectedCourseId] = useState('');
+  const [selectedLessonId, setSelectedLessonId] = useState('');
+  const [courseLessons, setCourseLessons] = useState([]);
 
   // 2. Assignments
   const [assignTitle, setAssignTitle] = useState('');
   const [assignDesc, setAssignDesc] = useState('');
   const [assignDeadline, setAssignDeadline] = useState('');
   const [uploadedAssignFile, setUploadedAssignFile] = useState(null);
+  const [assignCourseIds, setAssignCourseIds] = useState([]);
+  const [assignMaxMarks, setAssignMaxMarks] = useState(100);
 
   // 3. Grading
   const [selectedSubmission, setSelectedSubmission] = useState(null);
@@ -82,10 +89,41 @@ const AdminDashboard = () => {
   const [activeAssignmentSubmissions, setActiveAssignmentSubmissions] = useState([]);
   const [selectedAssignForSubs, setSelectedAssignForSubs] = useState(null);
 
+  // 5. Quizzes Management
+  const [quizzesList, setQuizzesList] = useState([]);
+  const [loadingQuizzes, setLoadingQuizzes] = useState(false);
+  const [selectedQuizForStats, setSelectedQuizForStats] = useState(null);
+  const [quizStats, setQuizStats] = useState(null);
+  const [loadingQuizStats, setLoadingQuizStats] = useState(false);
+
+  // Quiz Form
+  const [quizCourseId, setQuizCourseId] = useState('');
+  const [quizLessons, setQuizLessons] = useState([]);
+  const [quizLessonId, setQuizLessonId] = useState('');
+  const [quizQuestionText, setQuizQuestionText] = useState('');
+  const [quizType, setQuizType] = useState('mcq');
+  const [quizOptions, setQuizOptions] = useState([{ option_text: '', is_correct: false }]);
+  const [quizCorrectAnswer, setQuizCorrectAnswer] = useState('');
+  const [quizDifficulty, setQuizDifficulty] = useState(5);
+  const [quizMaxAttempts, setQuizMaxAttempts] = useState(3);
+  const [quizTimeLimit, setQuizTimeLimit] = useState('');
+  const [quizPassingScore, setQuizPassingScore] = useState(70);
+  const [quizExplanation, setQuizExplanation] = useState('');
+  const [quizNegativeMarking, setQuizNegativeMarking] = useState(0);
+
   // Status logs
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const fetchCourses = async () => {
+    try {
+      const res = await api.get('/courses');
+      setCourses(res.data?.data?.items || []);
+    } catch (e) {
+      // Ignored
+    }
+  };
 
   useEffect(() => {
     fetchUsers();
@@ -93,6 +131,7 @@ const AdminDashboard = () => {
     fetchLogs();
     fetchAssignments();
     fetchSharedNotes();
+    fetchCourses();
   }, []);
 
   const handleToggleRole = async (userId, currentRole) => {
@@ -171,6 +210,21 @@ const AdminDashboard = () => {
     }
   };
 
+  const handleCourseChangeForNotes = async (courseId) => {
+    setSelectedCourseId(courseId);
+    setSelectedLessonId('');
+    if (!courseId) {
+      setCourseLessons([]);
+      return;
+    }
+    try {
+      const res = await api.get(`/courses/${courseId}`);
+      setCourseLessons(res.data?.data?.lessons || []);
+    } catch (e) {
+      setCourseLessons([]);
+    }
+  };
+
   // Publish Shared Note
   const handlePublishNote = async (e) => {
     e.preventDefault();
@@ -184,24 +238,27 @@ const AdminDashboard = () => {
       setErrorMsg('');
       setSuccessMsg('');
 
-      const res = await api.post('/lms-notes', {
+      await api.post('/lms-notes', {
         title: noteTitle,
         description: noteDesc,
         subject: noteSubject,
         file_name: uploadedNoteFile.file_name,
         file_url: uploadedNoteFile.file_url,
-        file_type: uploadedNoteFile.file_name.split('.').pop() || 'pdf'
+        file_type: uploadedNoteFile.file_name.split('.').pop() || 'pdf',
+        course_id: selectedCourseId || null,
+        lesson_id: selectedLessonId || null,
+        file_size: uploadedNoteFile.file_size || 0
       });
 
-      if (res.data?.success) {
-        setSuccessMsg('Note published successfully!');
-        setNoteTitle('');
-        setNoteDesc('');
-        setNoteSubject('');
-        setUploadedNoteFile(null);
-        fetchSharedNotes();
-        fetchStats();
-      }
+      setSuccessMsg('Note published successfully!');
+      setNoteTitle('');
+      setNoteDesc('');
+      setNoteSubject('');
+      setSelectedCourseId('');
+      setSelectedLessonId('');
+      setUploadedNoteFile(null);
+      fetchSharedNotes();
+      fetchStats();
     } catch (err) {
       setErrorMsg('Publish error: ' + (err.response?.data?.message || err.message));
     } finally {
@@ -217,22 +274,24 @@ const AdminDashboard = () => {
       setErrorMsg('');
       setSuccessMsg('');
 
-      const res = await api.post('/assignments', {
+      await api.post('/assignments', {
         title: assignTitle,
         description: assignDesc,
         deadline: new Date(assignDeadline).toISOString(),
-        file_url: uploadedAssignFile?.file_url || ''
+        file_url: uploadedAssignFile?.file_url || '',
+        course_ids: assignCourseIds,
+        max_marks: parseInt(assignMaxMarks)
       });
 
-      if (res.data?.success) {
-        setSuccessMsg('Assignment published successfully!');
-        setAssignTitle('');
-        setAssignDesc('');
-        setAssignDeadline('');
-        setUploadedAssignFile(null);
-        fetchAssignments();
-        fetchStats();
-      }
+      setSuccessMsg('Assignment published successfully!');
+      setAssignTitle('');
+      setAssignDesc('');
+      setAssignDeadline('');
+      setAssignCourseIds([]);
+      setAssignMaxMarks(100);
+      setUploadedAssignFile(null);
+      fetchAssignments();
+      fetchStats();
     } catch (err) {
       setErrorMsg('Publish error: ' + (err.response?.data?.message || err.message));
     } finally {
@@ -304,6 +363,107 @@ const AdminDashboard = () => {
     }
   };
 
+  // Quiz course/lesson controls
+  const handleQuizCourseChange = async (courseId) => {
+    setQuizCourseId(courseId);
+    setQuizLessonId('');
+    setQuizzesList([]);
+    if (!courseId) {
+      setQuizLessons([]);
+      return;
+    }
+    try {
+      const res = await api.get(`/courses/${courseId}`);
+      setQuizLessons(res.data?.data?.lessons || []);
+    } catch (e) {
+      setQuizLessons([]);
+    }
+  };
+
+  const handleQuizLessonChange = async (lessonId) => {
+    setQuizLessonId(lessonId);
+    if (!lessonId) {
+      setQuizzesList([]);
+      return;
+    }
+    setLoadingQuizzes(true);
+    try {
+      const res = await api.get(`/lessons/${lessonId}/quizzes`);
+      setQuizzesList(res.data?.data?.items || []);
+    } catch (e) {
+      setQuizzesList([]);
+    } finally {
+      setLoadingQuizzes(false);
+    }
+  };
+
+  const handlePublishQuiz = async (e) => {
+    e.preventDefault();
+    if (!quizLessonId) {
+      setErrorMsg('Please select a course and lesson first.');
+      return;
+    }
+    try {
+      setSubmitting(true);
+      setErrorMsg('');
+      setSuccessMsg('');
+
+      const payload = {
+        lesson_id: quizLessonId,
+        question_text: quizQuestionText,
+        quiz_type: quizType,
+        options: quizType === 'mcq' ? quizOptions.filter(o => o.option_text.trim() !== '') : [],
+        correct_answer: quizType !== 'mcq' ? quizCorrectAnswer : null,
+        difficulty_level: parseInt(quizDifficulty),
+        max_attempts: parseInt(quizMaxAttempts),
+        time_limit_seconds: quizTimeLimit ? parseInt(quizTimeLimit) : null,
+        passing_score: parseInt(quizPassingScore),
+        explanation: quizExplanation,
+        negative_marking: parseFloat(quizNegativeMarking),
+        is_published: true
+      };
+
+      const res = await api.post(`/lessons/${quizLessonId}/quizzes`, payload);
+      if (res.data?.success) {
+        setSuccessMsg('Quiz created successfully!');
+        setQuizQuestionText('');
+        setQuizOptions([{ option_text: '', is_correct: false }]);
+        setQuizCorrectAnswer('');
+        setQuizExplanation('');
+        setQuizNegativeMarking(0);
+        handleQuizLessonChange(quizLessonId);
+      }
+    } catch (err) {
+      setErrorMsg('Quiz creation error: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteQuiz = async (quizId) => {
+    if (!window.confirm('Delete this quiz?')) return;
+    try {
+      await api.delete(`/quizzes/${quizId}`);
+      setSuccessMsg('Quiz deleted successfully!');
+      handleQuizLessonChange(quizLessonId);
+    } catch (e) {
+      alert('Failed to delete quiz');
+    }
+  };
+
+  const handleViewQuizStats = async (quiz) => {
+    setSelectedQuizForStats(quiz);
+    setLoadingQuizStats(true);
+    try {
+      const res = await api.get(`/quizzes/${quiz.id}/stats`);
+      setQuizStats(res.data?.data);
+    } catch (e) {
+      setQuizStats(null);
+    } finally {
+      setLoadingQuizStats(false);
+    }
+  };
+
   const usersList = usersData?.items || usersData?.users || [];
   const totalCount = statsData?.total_users || usersList.length;
 
@@ -361,6 +521,7 @@ const AdminDashboard = () => {
           { id: 'users', label: 'User Directory', icon: Users },
           { id: 'notes', label: 'Study Notes', icon: BookOpen },
           { id: 'assignments', label: 'Assignments', icon: FileText },
+          { id: 'quizzes', label: 'Quizzes', icon: HelpCircle },
           { id: 'logs', label: 'Audit Logs', icon: Clock }
         ].map(tab => {
           const Icon = tab.icon;
@@ -449,24 +610,21 @@ const AdminDashboard = () => {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
               <input
                 type="text"
-                placeholder="Search by name or email..."
+                placeholder="Search students..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-950 border border-slate-850 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-brand-500 transition"
+                className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-brand-500 transition animate-fade-in"
               />
             </div>
+            <span className="text-xs text-slate-500 font-bold">Total Accounts: {totalCount}</span>
           </div>
 
           <div className="overflow-x-auto">
-            {loadingUsers ? (
-              <div className="flex h-48 items-center justify-center">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-500 border-t-transparent"></div>
-              </div>
-            ) : filteredUsers.length > 0 ? (
+            {filteredUsers.length > 0 ? (
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b border-slate-900 bg-slate-900/20 text-slate-400 font-bold uppercase tracking-wider">
-                    <th className="p-4">Full Name</th>
+                    <th className="p-4">Name</th>
                     <th className="p-4">Email</th>
                     <th className="p-4">Role</th>
                     <th className="p-4">Points</th>
@@ -577,6 +735,36 @@ const AdminDashboard = () => {
                 />
               </div>
 
+              <div className="space-y-2">
+                <label className="text-xs text-slate-400 font-bold block">Associate with Course (Optional)</label>
+                <select
+                  value={selectedCourseId}
+                  onChange={(e) => handleCourseChangeForNotes(e.target.value)}
+                  className="w-full rounded-xl bg-slate-900 border border-slate-800 p-3 text-slate-200 text-sm focus:border-brand-500 focus:outline-none cursor-pointer"
+                >
+                  <option value="">-- No Course --</option>
+                  {courses.map(c => (
+                    <option key={c.id} value={c.id}>{c.title}</option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedCourseId && (
+                <div className="space-y-2 animate-fade-in">
+                  <label className="text-xs text-slate-400 font-bold block">Associate with Lesson (Optional)</label>
+                  <select
+                    value={selectedLessonId}
+                    onChange={(e) => setSelectedLessonId(e.target.value)}
+                    className="w-full rounded-xl bg-slate-900 border border-slate-800 p-3 text-slate-200 text-sm focus:border-brand-500 focus:outline-none cursor-pointer"
+                  >
+                    <option value="">-- No Lesson --</option>
+                    {courseLessons.map(l => (
+                      <option key={l.id} value={l.id}>{l.title}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {/* Note PDF Picker */}
               <div className="space-y-2">
                 <label className="text-xs text-slate-400 font-bold block">Upload Note Document (PDF, DOCX, PPT)</label>
@@ -609,7 +797,7 @@ const AdminDashboard = () => {
               <button 
                 type="submit"
                 disabled={submitting}
-                className="w-full py-3 bg-brand-500 hover:bg-brand-600 text-white font-bold rounded-xl text-xs transition flex items-center justify-center space-x-2"
+                className="w-full py-3 bg-brand-500 hover:bg-brand-600 text-white font-bold rounded-xl text-xs transition flex items-center justify-center space-x-2 cursor-pointer"
               >
                 {submitting ? 'Processing...' : 'Publish Study Note'}
               </button>
@@ -624,22 +812,25 @@ const AdminDashboard = () => {
                 sharedNotes.map(n => (
                   <div key={n.id} className="p-4 rounded-xl bg-slate-950/60 border border-slate-900 flex items-center justify-between gap-4">
                     <div>
-                      <span className="text-[9px] uppercase font-bold text-brand-400 px-2 py-0.5 rounded bg-brand-500/10 border border-brand-500/20">
-                        {n.subject}
-                      </span>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-[9px] uppercase font-bold text-brand-400 px-2 py-0.5 rounded bg-brand-500/10 border border-brand-500/20">
+                          {n.subject}
+                        </span>
+                        <span className="text-[10px] text-slate-500">
+                          Downloads: <strong>{n.download_count || 0}</strong>
+                        </span>
+                      </div>
                       <h4 className="text-sm font-bold text-slate-200 mt-2">{n.title}</h4>
                       <p className="text-xs text-slate-400 leading-normal">{n.description}</p>
                     </div>
 
                     <div className="flex items-center space-x-2">
-                      <a 
-                        href={getFileUrl(n.file_url)} 
-                        target="_blank" 
-                        rel="noreferrer" 
+                      <button 
+                        onClick={() => window.open(`${api.defaults.baseURL || 'https://virtual-ai-tutor-tqet.onrender.com/api/v1'}/lms-notes/${n.id}/file`, '_blank')}
                         className="p-2 border border-slate-800 hover:text-white rounded-lg transition"
                       >
                         <Eye className="h-4 w-4 text-slate-400" />
-                      </a>
+                      </button>
                       <button 
                         onClick={() => handleRemoveNote(n.id)}
                         className="p-2 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-lg transition cursor-pointer"
@@ -692,14 +883,42 @@ const AdminDashboard = () => {
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs text-slate-400 font-bold block">Deadline Date</label>
-                <input 
-                  type="datetime-local"
-                  value={assignDeadline}
-                  onChange={(e) => setAssignDeadline(e.target.value)}
-                  className="w-full rounded-xl bg-slate-900 border border-slate-800 p-3 text-slate-200 text-sm focus:border-brand-500 focus:outline-none"
-                  required
-                />
+                <label className="text-xs text-slate-400 font-bold block">Assign to Courses (Hold Ctrl/Cmd to select multiple)</label>
+                <select
+                  multiple
+                  value={assignCourseIds}
+                  onChange={(e) => setAssignCourseIds(Array.from(e.target.selectedOptions, option => option.value))}
+                  className="w-full rounded-xl bg-slate-900 border border-slate-800 p-3 text-slate-200 text-sm focus:border-brand-500 focus:outline-none cursor-pointer h-24"
+                >
+                  {courses.map(c => (
+                    <option key={c.id} value={c.id}>{c.title}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs text-slate-400 font-bold block">Deadline Date</label>
+                  <input 
+                    type="datetime-local"
+                    value={assignDeadline}
+                    onChange={(e) => setAssignDeadline(e.target.value)}
+                    className="w-full rounded-xl bg-slate-900 border border-slate-800 p-3 text-slate-200 text-xs focus:border-brand-500 focus:outline-none"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs text-slate-400 font-bold block">Maximum Marks</label>
+                  <input 
+                    type="number"
+                    value={assignMaxMarks}
+                    onChange={(e) => setAssignMaxMarks(e.target.value)}
+                    placeholder="e.g. 100"
+                    className="w-full rounded-xl bg-slate-900 border border-slate-800 p-3 text-slate-200 text-xs focus:border-brand-500 focus:outline-none"
+                    required
+                  />
+                </div>
               </div>
 
               {/* Assignment PDF Picker */}
@@ -734,7 +953,7 @@ const AdminDashboard = () => {
               <button 
                 type="submit"
                 disabled={submitting}
-                className="w-full py-3 bg-brand-500 hover:bg-brand-600 text-white font-bold rounded-xl text-xs transition flex items-center justify-center space-x-2"
+                className="w-full py-3 bg-brand-500 hover:bg-brand-600 text-white font-bold rounded-xl text-xs transition flex items-center justify-center space-x-2 cursor-pointer"
               >
                 {submitting ? 'Processing...' : 'Create Assignment'}
               </button>
@@ -749,58 +968,79 @@ const AdminDashboard = () => {
               <div className="space-y-3">
                 {assignments && assignments.length > 0 ? (
                   assignments.map(a => (
-                    <div key={a.id} className="p-4 rounded-xl bg-slate-950/60 border border-slate-900 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div>
-                        <h4 className="text-sm font-bold text-slate-200">{a.title}</h4>
-                        <p className="text-xs text-slate-400 leading-normal">{a.description}</p>
-                        <p className="text-[10px] text-slate-500 font-semibold mt-1">Deadline: {new Date(a.deadline).toLocaleDateString()}</p>
-                      </div>
+                    <div key={a.id} className="p-4 rounded-xl bg-slate-950/60 border border-slate-900 flex flex-col space-y-3">
+                      <div className="flex justify-between items-start gap-4">
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-[10px] px-2 py-0.5 bg-slate-900 border border-slate-850 rounded text-slate-400">
+                              Max: {a.max_marks || 100} Marks
+                            </span>
+                          </div>
+                          <h4 className="text-sm font-bold text-slate-200 mt-2">{a.title}</h4>
+                          <p className="text-xs text-slate-400 leading-normal">{a.description}</p>
+                          <p className="text-[10px] text-slate-500 font-semibold mt-1">
+                            Due: {new Date(a.deadline).toLocaleDateString()} {new Date(a.deadline).toLocaleTimeString()}
+                          </p>
+                        </div>
 
-                      <div className="flex items-center space-x-2 shrink-0">
-                        <button 
-                          onClick={() => handleLoadSubmissions(a)}
-                          className="px-3 py-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-bold text-xs rounded-lg transition hover:bg-indigo-500 hover:text-white cursor-pointer"
-                        >
-                          View Submissions
-                        </button>
-                        <button 
-                          onClick={() => handleRemoveAssignment(a.id)}
-                          className="p-2 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-lg transition cursor-pointer"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <div className="flex items-center space-x-2 shrink-0">
+                          {a.file_url && (
+                            <button 
+                              onClick={() => window.open(`${api.defaults.baseURL || 'https://virtual-ai-tutor-tqet.onrender.com/api/v1'}/assignments/${a.id}/file`, '_blank')}
+                              className="p-2 border border-slate-800 hover:text-white rounded-lg transition"
+                              title="Preview Assignment Sheet"
+                            >
+                              <Eye className="h-4 w-4 text-slate-400" />
+                            </button>
+                          )}
+                          <button 
+                            onClick={() => handleLoadSubmissions(a)}
+                            className="px-3 py-1.5 bg-brand-500/10 border border-brand-500/20 text-brand-400 hover:bg-brand-500 hover:text-white transition font-bold text-xs rounded-lg cursor-pointer"
+                          >
+                            Submissions
+                          </button>
+                          <button 
+                            onClick={() => handleRemoveAssignment(a.id)}
+                            className="p-2 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-lg transition cursor-pointer"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))
                 ) : (
-                  <p className="text-xs text-slate-500 py-6 text-center">No assignments published.</p>
+                  <p className="text-xs text-slate-500 py-6 text-center">No assignments published yet.</p>
                 )}
               </div>
             </div>
 
-            {/* Submissions list drawer */}
+            {/* Submissions Review Panel Drawer */}
             {selectedAssignForSubs && (
-              <div className="glass p-6 rounded-2xl border border-slate-850 space-y-4">
-                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-                  <h4 className="font-bold text-sm text-slate-200">Submissions for: {selectedAssignForSubs.title}</h4>
+              <div className="glass p-6 rounded-2xl border border-slate-800 space-y-4 animate-fade-in">
+                <div className="flex justify-between items-center border-b border-slate-900 pb-2">
+                  <h4 className="text-sm font-bold text-slate-200">
+                    Submissions: {selectedAssignForSubs.title}
+                  </h4>
                   <button 
-                    onClick={() => { setSelectedAssignForSubs(null); setActiveAssignmentSubmissions([]); setSelectedSubmission(null); }}
-                    className="text-xs text-slate-400 hover:text-white"
+                    onClick={() => { setSelectedAssignForSubs(null); setActiveAssignmentSubmissions([]); }}
+                    className="text-xs text-slate-500 hover:text-slate-300"
                   >
                     Close
                   </button>
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-4 max-h-96 overflow-y-auto pr-1">
                   {activeAssignmentSubmissions.length > 0 ? (
                     activeAssignmentSubmissions.map(s => (
-                      <div key={s.id} className="p-4 rounded-xl bg-slate-900 border border-slate-850 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div key={s.id} className="p-4 rounded-xl bg-slate-900/60 border border-slate-850 flex items-center justify-between gap-4">
                         <div className="space-y-1">
-                          <p className="text-xs font-bold text-slate-200">{s.student_name} ({s.student_email})</p>
+                          <p className="text-xs text-slate-200 font-bold">{s.student_name} <span className="text-[10px] text-slate-500 font-normal">({s.student_email})</span></p>
+                          <p className="text-[10px] text-slate-500">Submitted: {new Date(s.submitted_at).toLocaleString()}</p>
                           <p className="text-xs text-slate-400 leading-normal mt-1">{s.submission_text}</p>
                           {s.file_url && (
                             <a 
-                              href={getFileUrl(s.file_url)} 
+                              href={`${api.defaults.baseURL || 'https://virtual-ai-tutor-tqet.onrender.com/api/v1'}/submissions/${s.id}/file`}
                               target="_blank" 
                               rel="noreferrer"
                               className="text-[11px] text-brand-400 font-bold hover:underline flex items-center space-x-1 mt-1"
@@ -809,7 +1049,7 @@ const AdminDashboard = () => {
                             </a>
                           )}
                           {s.marks !== null && (
-                            <p className="text-[10px] text-emerald-400 font-bold mt-1">Graded: {s.marks}/100 - Feedback: {s.feedback}</p>
+                            <p className="text-[10px] text-emerald-400 font-bold mt-1">Graded: {s.marks}/{selectedAssignForSubs.max_marks || 100} - Feedback: {s.feedback}</p>
                           )}
                         </div>
 
@@ -844,11 +1084,11 @@ const AdminDashboard = () => {
 
                   <form onSubmit={handleGradeSubmit} className="space-y-4">
                     <div className="space-y-2">
-                      <label className="text-xs text-slate-400 font-bold block">Marks / Score (0-100)</label>
+                      <label className="text-xs text-slate-400 font-bold block">Marks / Score (0-{selectedAssignForSubs?.max_marks || 100})</label>
                       <input 
                         type="number" 
                         min="0" 
-                        max="100"
+                        max={selectedAssignForSubs?.max_marks || 100}
                         value={gradeMarks}
                         onChange={(e) => setGradeMarks(e.target.value)}
                         className="w-full rounded-xl bg-slate-900 border border-slate-800 p-3 text-slate-200 text-sm focus:border-brand-500 focus:outline-none"
@@ -873,12 +1113,292 @@ const AdminDashboard = () => {
                     <button 
                       type="submit"
                       disabled={submitting}
-                      className="w-full py-3 bg-brand-500 hover:bg-brand-600 text-white font-bold rounded-xl text-xs transition"
+                      className="w-full py-3 bg-brand-500 hover:bg-brand-600 text-white font-bold rounded-xl text-xs transition cursor-pointer"
                     >
                       {submitting ? 'Submitting...' : 'Submit Grade'}
                     </button>
                   </form>
                 </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Quiz Management Tab */}
+      {activeTab === 'quizzes' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-fade-in">
+          {/* Quiz Publisher Form */}
+          <div className="glass p-6 rounded-2xl border border-slate-800 space-y-4 h-fit">
+            <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+              <PlusCircle className="h-5 w-5 text-brand-400" />
+              <span>Create Quiz Question</span>
+            </h3>
+
+            <form onSubmit={handlePublishQuiz} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs text-slate-400 font-bold block">Select Course</label>
+                <select
+                  value={quizCourseId}
+                  onChange={(e) => handleQuizCourseChange(e.target.value)}
+                  className="w-full rounded-xl bg-slate-900 border border-slate-800 p-3 text-slate-200 text-sm focus:border-brand-500 focus:outline-none cursor-pointer"
+                  required
+                >
+                  <option value="">-- Choose Course --</option>
+                  {courses.map(c => (
+                    <option key={c.id} value={c.id}>{c.title}</option>
+                  ))}
+                </select>
+              </div>
+
+              {quizCourseId && (
+                <div className="space-y-2 animate-fade-in">
+                  <label className="text-xs text-slate-400 font-bold block">Select Lesson</label>
+                  <select
+                    value={quizLessonId}
+                    onChange={(e) => handleQuizLessonChange(e.target.value)}
+                    className="w-full rounded-xl bg-slate-900 border border-slate-800 p-3 text-slate-200 text-sm focus:border-brand-500 focus:outline-none cursor-pointer"
+                    required
+                  >
+                    <option value="">-- Choose Lesson --</option>
+                    {quizLessons.map(l => (
+                      <option key={l.id} value={l.id}>{l.title}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {quizLessonId && (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-xs text-slate-400 font-bold block">Question Text</label>
+                    <textarea
+                      value={quizQuestionText}
+                      onChange={(e) => setQuizQuestionText(e.target.value)}
+                      placeholder="Type the quiz question..."
+                      className="w-full h-20 rounded-xl bg-slate-900 border border-slate-800 p-3 text-slate-200 text-sm focus:border-brand-500 focus:outline-none"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs text-slate-400 font-bold block">Quiz Type</label>
+                    <select
+                      value={quizType}
+                      onChange={(e) => setQuizType(e.target.value)}
+                      className="w-full rounded-xl bg-slate-900 border border-slate-800 p-3 text-slate-200 text-sm focus:border-brand-500 focus:outline-none cursor-pointer"
+                    >
+                      <option value="mcq">Multiple Choice (MCQ)</option>
+                      <option value="short_answer">Short Answer</option>
+                      <option value="essay">Essay Response</option>
+                    </select>
+                  </div>
+
+                  {quizType === 'mcq' && (
+                    <div className="space-y-3">
+                      <label className="text-xs text-slate-400 font-bold block">Options</label>
+                      {quizOptions.map((opt, index) => (
+                        <div key={index} className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            checked={opt.is_correct}
+                            onChange={(e) => {
+                              const newOpts = [...quizOptions];
+                              newOpts[index].is_correct = e.target.checked;
+                              setQuizOptions(newOpts);
+                            }}
+                            className="h-4 w-4 accent-brand-500 cursor-pointer"
+                          />
+                          <input
+                            type="text"
+                            value={opt.option_text}
+                            onChange={(e) => {
+                              const newOpts = [...quizOptions];
+                              newOpts[index].option_text = e.target.value;
+                              setQuizOptions(newOpts);
+                            }}
+                            placeholder={`Option ${index + 1}`}
+                            className="flex-1 rounded-xl bg-slate-900 border border-slate-800 px-3 py-2 text-slate-200 text-xs focus:border-brand-500 focus:outline-none"
+                          />
+                          {quizOptions.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setQuizOptions(quizOptions.filter((_, idx) => idx !== index))}
+                              className="text-red-500 text-xs font-bold hover:underline"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setQuizOptions([...quizOptions, { option_text: '', is_correct: false }])}
+                        className="text-xs font-bold text-brand-400 hover:text-brand-300 transition"
+                      >
+                        + Add Option
+                      </button>
+                    </div>
+                  )}
+
+                  {quizType === 'short_answer' && (
+                    <div className="space-y-2">
+                      <label className="text-xs text-slate-400 font-bold block">Correct Answer Key</label>
+                      <input
+                        type="text"
+                        value={quizCorrectAnswer}
+                        onChange={(e) => setQuizCorrectAnswer(e.target.value)}
+                        placeholder="Expected exact answer..."
+                        className="w-full rounded-xl bg-slate-900 border border-slate-800 p-3 text-slate-200 text-sm focus:border-brand-500 focus:outline-none"
+                        required
+                      />
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-xs text-slate-400 font-bold block">Negative Marking Penalty</label>
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        max="1"
+                        value={quizNegativeMarking}
+                        onChange={(e) => setQuizNegativeMarking(e.target.value)}
+                        className="w-full rounded-xl bg-slate-900 border border-slate-800 p-3 text-slate-200 text-sm focus:border-brand-500 focus:outline-none"
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs text-slate-400 font-bold block">Time Limit (Secs, Optional)</label>
+                      <input
+                        type="number"
+                        value={quizTimeLimit}
+                        onChange={(e) => setQuizTimeLimit(e.target.value)}
+                        placeholder="e.g. 60"
+                        className="w-full rounded-xl bg-slate-900 border border-slate-800 p-3 text-slate-200 text-sm focus:border-brand-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs text-slate-400 font-bold block">Tutor Explanation</label>
+                    <textarea
+                      value={quizExplanation}
+                      onChange={(e) => setQuizExplanation(e.target.value)}
+                      placeholder="Why is this answer correct?..."
+                      className="w-full h-16 rounded-xl bg-slate-900 border border-slate-800 p-3 text-slate-200 text-sm focus:border-brand-500 focus:outline-none"
+                    />
+                  </div>
+
+                  {errorMsg && <p className="text-xs text-red-400 font-bold">{errorMsg}</p>}
+                  {successMsg && <p className="text-xs text-emerald-400 font-bold">{successMsg}</p>}
+
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="w-full py-3 bg-brand-500 hover:bg-brand-600 text-white font-bold rounded-xl text-xs transition cursor-pointer"
+                  >
+                    {submitting ? 'Creating...' : 'Publish Quiz'}
+                  </button>
+                </>
+              )}
+            </form>
+          </div>
+
+          {/* Quizzes List & Statistics details */}
+          <div className="lg:col-span-2 space-y-8 h-fit">
+            <div className="glass p-6 rounded-2xl border border-slate-800 space-y-4">
+              <h3 className="text-lg font-bold text-slate-100">Quizzes in Lesson</h3>
+              
+              {!quizLessonId ? (
+                <p className="text-xs text-slate-500 py-6 text-center">Please select a course and lesson above to view quizzes.</p>
+              ) : loadingQuizzes ? (
+                <div className="flex justify-center py-6">
+                  <RefreshCw className="h-6 w-6 animate-spin text-brand-500" />
+                </div>
+              ) : quizzesList.length > 0 ? (
+                <div className="space-y-3">
+                  {quizzesList.map((q) => (
+                    <div key={q.id} className="p-4 rounded-xl bg-slate-950/60 border border-slate-900 flex items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-[9px] uppercase font-bold text-indigo-400 px-2 py-0.5 rounded bg-indigo-500/10">
+                            {q.quiz_type}
+                          </span>
+                          {q.negative_marking > 0 && (
+                            <span className="text-[9px] uppercase font-bold text-red-400 px-2 py-0.5 rounded bg-red-500/10">
+                              Penalty: -{q.negative_marking}
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="text-sm font-bold text-slate-200 mt-1">{q.question_text}</h4>
+                      </div>
+
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => handleViewQuizStats(q)}
+                          className="p-2 border border-slate-800 hover:bg-slate-900 rounded-lg text-xs font-bold text-brand-400 transition cursor-pointer"
+                        >
+                          View Stats
+                        </button>
+                        <button
+                          onClick={() => handleDeleteQuiz(q.id)}
+                          className="p-2 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-lg transition cursor-pointer"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500 py-6 text-center">No quizzes published in this lesson yet.</p>
+              )}
+            </div>
+
+            {/* Quiz Performance Stats Detail */}
+            {selectedQuizForStats && (
+              <div className="glass p-6 rounded-2xl border border-slate-800 space-y-4 animate-fade-in">
+                <div className="flex justify-between items-center border-b border-slate-900 pb-2">
+                  <h4 className="text-sm font-bold text-slate-200">
+                    Stats: {selectedQuizForStats.question_text}
+                  </h4>
+                  <button 
+                    onClick={() => { setSelectedQuizForStats(null); setQuizStats(null); }}
+                    className="text-xs text-slate-500 hover:text-slate-355"
+                  >
+                    Close
+                  </button>
+                </div>
+
+                {loadingQuizStats ? (
+                  <div className="flex justify-center py-6">
+                    <RefreshCw className="h-5 w-5 animate-spin text-brand-500" />
+                  </div>
+                ) : quizStats ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-900 text-center">
+                      <span className="text-[10px] text-slate-500 font-bold uppercase block">Avg Score</span>
+                      <span className="text-lg font-extrabold text-white mt-1 block">{quizStats.average_score}%</span>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-900 text-center">
+                      <span className="text-[10px] text-slate-500 font-bold uppercase block">Highest Score</span>
+                      <span className="text-lg font-extrabold text-emerald-400 mt-1 block">{quizStats.highest_score}%</span>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-900 text-center">
+                      <span className="text-[10px] text-slate-500 font-bold uppercase block">Lowest Score</span>
+                      <span className="text-lg font-extrabold text-red-400 mt-1 block">{quizStats.lowest_score}%</span>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-900 text-center">
+                      <span className="text-[10px] text-slate-500 font-bold uppercase block">Completion Rate</span>
+                      <span className="text-lg font-extrabold text-brand-400 mt-1 block">{quizStats.completion_rate}%</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 italic">Could not fetch statistics for this quiz question.</p>
+                )}
               </div>
             )}
           </div>

@@ -6,4 +6,5 @@ class Notification(Base):
     def __init__(self, **kwargs):
         kwargs.setdefault("user_id", None)
         kwargs.setdefault("is_read", False)
+        kwargs.setdefault("read_by", [])
         super().__init__(**kwargs)

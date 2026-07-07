@@ -17,7 +17,8 @@ async def create_quiz(
     explanation: Optional[str] = None,
     is_published: bool = True,
     available_from: Optional[datetime] = None,
-    available_until: Optional[datetime] = None
+    available_until: Optional[datetime] = None,
+    negative_marking: float = 0.0
 ) -> Quiz:
     quiz_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
@@ -41,6 +42,7 @@ async def create_quiz(
         "is_published": is_published,
         "available_from": from_time,
         "available_until": until_time,
+        "negative_marking": negative_marking,
         "created_at": now,
         "updated_at": now,
         "deleted_at": None

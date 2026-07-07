@@ -1,7 +1,9 @@
 import os
 import uuid
+import mimetypes
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, status, UploadFile, File
+from fastapi import APIRouter, Depends, status, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
 from app.core.database import get_db
 from app.core.security import get_current_user, RoleChecker
 from app.db.models.user import User
@@ -44,7 +46,11 @@ async def upload_assignment_file(
     return send_response(
         status_code=status.HTTP_201_CREATED,
         success=True,
-        data={"file_url": file_url, "file_name": file.filename},
+        data={
+            "file_url": file_url, 
+            "file_name": file.filename,
+            "file_size": len(content)
+        },
         message="File uploaded successfully."
     )
 
@@ -54,11 +60,20 @@ async def list_assignments(
     db = Depends(get_db)
 ):
     """
-    Lists all assignments. Students only see published ones.
+    Lists all assignments. Students only see published ones and filtered by their course enrollments.
     """
     query = {}
     if current_user.role == "student":
         query["is_published"] = True
+        
+        # Filter assignments by enrolled courses
+        enrolled_docs = await db.db["user_courses"].find({"user_id": current_user.id}).to_list(length=1000)
+        enrolled_course_ids = [doc["course_id"] for doc in enrolled_docs]
+        query["$or"] = [
+            {"course_ids": {"$in": enrolled_course_ids}},
+            {"course_ids": []},
+            {"course_ids": None}
+        ]
     
     cursor = db.db["assignments"].find(query)
     assignments_docs = await cursor.to_list(length=1000)
@@ -70,6 +85,11 @@ async def list_assignments(
         sub_status = "unsubmitted"
         marks = None
         feedback = None
+        sub_id = None
+        submitted_file_name = None
+        submitted_file_url = None
+        submission_text = None
+        submitted_at = None
         
         if current_user.role == "student":
             sub = await db.db["assignment_submissions"].find_one({
@@ -80,6 +100,11 @@ async def list_assignments(
                 sub_status = "submitted" if sub.get("marks") is None else "graded"
                 marks = sub.get("marks")
                 feedback = sub.get("feedback")
+                sub_id = sub.get("id")
+                submitted_file_name = sub.get("file_name")
+                submitted_file_url = sub.get("file_url")
+                submission_text = sub.get("submission_text")
+                submitted_at = sub.get("submitted_at")
                 
         enriched.append({
             "id": a.id,
@@ -88,11 +113,18 @@ async def list_assignments(
             "deadline": a.deadline,
             "file_url": a.file_url,
             "is_published": a.is_published,
+            "course_ids": getattr(a, "course_ids", []),
+            "max_marks": getattr(a, "max_marks", 100),
             "created_at": a.created_at,
             "updated_at": a.updated_at,
             "submission_status": sub_status,
             "marks": marks,
-            "feedback": feedback
+            "feedback": feedback,
+            "submission_id": sub_id,
+            "submitted_file_name": submitted_file_name,
+            "submitted_file_url": submitted_file_url,
+            "submission_text": submission_text,
+            "submitted_at": submitted_at
         })
         
     return send_response(status_code=status.HTTP_200_OK, success=True, data=enriched)
@@ -114,6 +146,8 @@ async def create_assignment(
         "deadline": body.deadline.isoformat() if isinstance(body.deadline, datetime) else body.deadline,
         "file_url": body.file_url,
         "is_published": body.is_published,
+        "course_ids": body.course_ids or [],
+        "max_marks": body.max_marks or 100,
         "created_at": now,
         "updated_at": now
     }
@@ -296,14 +330,69 @@ async def grade_submission(
     # Fetch assignment details for notification
     assignment_doc = await db.db["assignments"].find_one({"id": sub_doc.get("assignment_id")})
     title = assignment_doc.get("title") if assignment_doc else "Assignment"
+    max_marks = assignment_doc.get("max_marks", 100) if assignment_doc else 100
     
     # Notify student
     await create_notification(
         db=db,
         user_id=sub_doc.get("student_id"),
         title="Assignment Graded!",
-        content=f"Your submission for '{title}' has been graded. Marks: {body.marks}/100",
+        content=f"Your submission for '{title}' has been graded. Marks: {body.marks}/{max_marks}",
         notification_type="result"
     )
     
     return send_response(status_code=status.HTTP_200_OK, success=True, message="Submission graded successfully.")
+
+@router.get("/assignments/{assignmentId}/file")
+async def download_assignment_file(
+    assignmentId: str,
+    db = Depends(get_db)
+):
+    assignment = await db.db["assignments"].find_one({"id": assignmentId})
+    if not assignment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found.")
+        
+    file_url = assignment.get("file_url")
+    if not file_url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No file attached to this assignment.")
+        
+    filename = os.path.basename(file_url)
+    filepath = os.path.join(UPLOAD_DIR, filename)
+    if not os.path.exists(filepath):
+        filepath = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../uploads", filename))
+        if not os.path.exists(filepath):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on server.")
+            
+    media_type, _ = mimetypes.guess_type(filepath)
+    return FileResponse(
+        path=filepath,
+        filename=assignment.get("title") + os.path.splitext(filename)[1],
+        media_type=media_type or "application/octet-stream"
+    )
+
+@router.get("/submissions/{submissionId}/file")
+async def download_submission_file(
+    submissionId: str,
+    db = Depends(get_db)
+):
+    sub = await db.db["assignment_submissions"].find_one({"id": submissionId})
+    if not sub:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found.")
+        
+    file_url = sub.get("file_url")
+    if not file_url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No file attached to this submission.")
+        
+    filename = os.path.basename(file_url)
+    filepath = os.path.join(UPLOAD_DIR, filename)
+    if not os.path.exists(filepath):
+        filepath = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../uploads", filename))
+        if not os.path.exists(filepath):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on server.")
+            
+    media_type, _ = mimetypes.guess_type(filepath)
+    return FileResponse(
+        path=filepath,
+        filename=sub.get("file_name") or filename,
+        media_type=media_type or "application/octet-stream"
+    )
