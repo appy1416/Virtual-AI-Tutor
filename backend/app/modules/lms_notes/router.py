@@ -92,6 +92,13 @@ async def create_lms_note(
     
     return send_response(status_code=status.HTTP_201_CREATED, success=True, data=LMSNoteResponse.model_validate(note))
 
+def extract_filename(file_url: str) -> str:
+    if not file_url:
+        return ""
+    normalized = file_url.replace("\\", "/")
+    parts = [p for p in normalized.split("/") if p.strip()]
+    return parts[-1] if parts else ""
+
 @router.get("/lms-notes/{noteId}/file")
 async def download_note_file(
     noteId: str,
@@ -108,12 +115,37 @@ async def download_note_file(
     if not file_url:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No file attached to this note.")
         
-    filename = os.path.basename(file_url)
+    filename = extract_filename(file_url)
     filepath = os.path.join(UPLOAD_DIR, filename)
+    
+    # Check fallback path
     if not os.path.exists(filepath):
         filepath = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../uploads", filename))
-        if not os.path.exists(filepath):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on server.")
+        
+    # If still not found, create a placeholder notice to prevent 404s on ephemeral storage
+    if not os.path.exists(filepath):
+        placeholder_filename = f"placeholder_{filename}.txt"
+        placeholder_path = os.path.join(UPLOAD_DIR, placeholder_filename)
+        if not os.path.exists(placeholder_path):
+            with open(placeholder_path, "w", encoding="utf-8") as f:
+                f.write(
+                    f"EduTwin AI LMS - Ephemeral Storage Placeholder\n"
+                    f"==================================================\n\n"
+                    f"Original File Name: {note.get('file_name') or filename}\n"
+                    f"Note Title: {note.get('title') or 'LMS Note'}\n\n"
+                    f"Notice:\n"
+                    f"-------\n"
+                    f"Because this backend is hosted on a free cloud tier (like Render) with ephemeral storage,\n"
+                    f"uploaded files are automatically cleared whenever the container restarts or redeploys.\n\n"
+                    f"To view the original file, please log in as an Admin and re-upload the document.\n"
+                )
+        filepath = placeholder_path
+        download_name = f"placeholder_{note.get('file_name') or filename}.txt"
+        media_type = "text/plain"
+    else:
+        download_name = note.get('file_name') or filename
+        media_type, _ = mimetypes.guess_type(filepath)
+        media_type = media_type or "application/octet-stream"
             
     # Increment download count
     await db.db["lms_notes"].update_one(
@@ -121,11 +153,10 @@ async def download_note_file(
         {"$inc": {"download_count": 1}}
     )
     
-    media_type, _ = mimetypes.guess_type(filepath)
     return FileResponse(
         path=filepath,
-        filename=note.get("file_name") or filename,
-        media_type=media_type or "application/octet-stream"
+        filename=download_name,
+        media_type=media_type
     )
 
 @router.delete("/lms-notes/{noteId}")

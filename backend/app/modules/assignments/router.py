@@ -343,6 +343,13 @@ async def grade_submission(
     
     return send_response(status_code=status.HTTP_200_OK, success=True, message="Submission graded successfully.")
 
+def extract_filename(file_url: str) -> str:
+    if not file_url:
+        return ""
+    normalized = file_url.replace("\\", "/")
+    parts = [p for p in normalized.split("/") if p.strip()]
+    return parts[-1] if parts else ""
+
 @router.get("/assignments/{assignmentId}/file")
 async def download_assignment_file(
     assignmentId: str,
@@ -356,18 +363,39 @@ async def download_assignment_file(
     if not file_url:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No file attached to this assignment.")
         
-    filename = os.path.basename(file_url)
+    filename = extract_filename(file_url)
     filepath = os.path.join(UPLOAD_DIR, filename)
     if not os.path.exists(filepath):
         filepath = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../uploads", filename))
-        if not os.path.exists(filepath):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on server.")
+        
+    if not os.path.exists(filepath):
+        placeholder_filename = f"placeholder_{filename}.txt"
+        placeholder_path = os.path.join(UPLOAD_DIR, placeholder_filename)
+        if not os.path.exists(placeholder_path):
+            with open(placeholder_path, "w", encoding="utf-8") as f:
+                f.write(
+                    f"EduTwin AI LMS - Ephemeral Storage Placeholder\n"
+                    f"==================================================\n\n"
+                    f"Original File Name: {filename}\n"
+                    f"Assignment: {assignment.get('title') or 'LMS Assignment'}\n\n"
+                    f"Notice:\n"
+                    f"-------\n"
+                    f"Because this backend is hosted on a free cloud tier (like Render) with ephemeral storage,\n"
+                    f"uploaded files are automatically cleared whenever the container restarts or redeploys.\n\n"
+                    f"To view the original file, please log in as an Admin and re-upload the document.\n"
+                )
+        filepath = placeholder_path
+        download_name = f"placeholder_{assignment.get('title') or 'assignment'}.txt"
+        media_type = "text/plain"
+    else:
+        download_name = assignment.get("title") + os.path.splitext(filename)[1]
+        media_type, _ = mimetypes.guess_type(filepath)
+        media_type = media_type or "application/octet-stream"
             
-    media_type, _ = mimetypes.guess_type(filepath)
     return FileResponse(
         path=filepath,
-        filename=assignment.get("title") + os.path.splitext(filename)[1],
-        media_type=media_type or "application/octet-stream"
+        filename=download_name,
+        media_type=media_type
     )
 
 @router.get("/submissions/{submissionId}/file")
@@ -383,16 +411,37 @@ async def download_submission_file(
     if not file_url:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No file attached to this submission.")
         
-    filename = os.path.basename(file_url)
+    filename = extract_filename(file_url)
     filepath = os.path.join(UPLOAD_DIR, filename)
     if not os.path.exists(filepath):
         filepath = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../uploads", filename))
-        if not os.path.exists(filepath):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on server.")
+        
+    if not os.path.exists(filepath):
+        placeholder_filename = f"placeholder_{filename}.txt"
+        placeholder_path = os.path.join(UPLOAD_DIR, placeholder_filename)
+        if not os.path.exists(placeholder_path):
+            with open(placeholder_path, "w", encoding="utf-8") as f:
+                f.write(
+                    f"EduTwin AI LMS - Ephemeral Storage Placeholder\n"
+                    f"==================================================\n\n"
+                    f"Original File Name: {sub.get('file_name') or filename}\n"
+                    f"Student Name: {sub.get('student_name') or 'Student'}\n\n"
+                    f"Notice:\n"
+                    f"-------\n"
+                    f"Because this backend is hosted on a free cloud tier (like Render) with ephemeral storage,\n"
+                    f"uploaded files are automatically cleared whenever the container restarts or redeploys.\n\n"
+                    f"Please contact the student to re-submit their work if you need to review the original document.\n"
+                )
+        filepath = placeholder_path
+        download_name = f"placeholder_{sub.get('file_name') or filename}.txt"
+        media_type = "text/plain"
+    else:
+        download_name = sub.get("file_name") or filename
+        media_type, _ = mimetypes.guess_type(filepath)
+        media_type = media_type or "application/octet-stream"
             
-    media_type, _ = mimetypes.guess_type(filepath)
     return FileResponse(
         path=filepath,
-        filename=sub.get("file_name") or filename,
-        media_type=media_type or "application/octet-stream"
+        filename=download_name,
+        media_type=media_type
     )
