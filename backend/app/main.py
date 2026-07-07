@@ -130,6 +130,12 @@ async def startup_event():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         
+    from app.core.database import is_mongo, load_from_mongodb_to_sqlite
+    if is_mongo:
+        logger.info("Loading existing database documents from MongoDB Atlas...")
+        async with AsyncSessionLocal() as session:
+            await load_from_mongodb_to_sqlite(session)
+        
     logger.info("Seeding initial database data...")
     async with AsyncSessionLocal() as session:
         await seed_data(session)

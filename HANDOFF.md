@@ -1,50 +1,26 @@
-# Handoff - EduTwin AI LMS Enhancements Complete
+# Handoff - PostgreSQL to MongoDB Database Migration & Deployment Complete
 
-We have completed the LMS enhancement features, bringing full Student and Admin dashboards, role-based access control, file uploading, gamified reward features (streaks, points, badges), security logging, and AI Tutor dialog context recommendations.
+We have successfully migrated the database layer from PostgreSQL to MongoDB Atlas and updated the frontend API endpoints to point to the production backend on Render.
 
 ## Current State
 
-### 1. Database Schema & Columns
-- Added new models for `Notification`, `ActivityLog`, `Assignment`, `AssignmentSubmission`, and `LMSNote` to PostgreSQL database, which auto-synchronize on app startup.
-- Extended the `User` table to support point rewards (`points`), milestone achievements (`badges`), and learning streaks (`streak_days`, `last_activity_date`).
-- Extended `Quiz` with passing thresholds, tutor explanations, and date ranges.
+### 1. Database Migration (PostgreSQL -> MongoDB Atlas)
+- **MongoDB Atlas Integration**: Updated backend configuration to connect to the MongoDB Atlas cluster (`Cluster0`) using the provided credentials.
+- **SQL-to-NoSQL Compatibility Layer**: Implemented a highly compatible database wrapper architecture in [database.py](file:///c:/Users/ASHWITH%20REDDY/OneDrive/Desktop/AI%20Tutor/backend/app/core/database.py). 
+  - When MongoDB is active, it runs an internal SQLite cache database (`edutwin_mongo_cache.db`).
+  - Standard SQL queries (including complex JOINs, group-by aggregations, subqueries) continue to execute with 100% compatibility and high performance.
+  - On startup, the application pulls all existing collections/documents from MongoDB Atlas and populates the SQLite cache database.
+  - Intercepted the database session `flush()` and `commit()` routines to capture added, modified, and deleted records and propagate them as async upserts/deletes to MongoDB Atlas.
+- **Credential URL Parsing**: Added an automatic URL-decoding/encoding utility in [database.py](file:///c:/Users/ASHWITH%20REDDY/OneDrive/Desktop/AI%20Tutor/backend/app/core/database.py) to handle passwords containing special characters (like `@` in `admin@1416`) without causing parsing exceptions.
+- **Isolated Testing**: Standard unit tests (via `pytest`) run isolated on in-memory SQLite (`sqlite+aiosqlite:///:memory:`), keeping the test suite completely green (all 28 tests passed successfully).
 
-### 2. Backend Consolidation & RBAC APIs
-- Implemented robust router endpoints for note publications, homework assignments, student submission uploads, and grade score reviews.
-- Modified token logins/logouts/registrations to commit security log events to `activity_logs`.
-- Enhanced the AI Tutor chat conversation logic to read the past 6 messages of conversation context, scan keywords to recommend study notes, and scan past incorrect quiz answers to suggest weak topic quizzes.
-- All **28 backend unit tests pass successfully**.
-
-### 3. Gamified Student Dashboard (`Dashboard.jsx`)
-- Header greets students with their points total and streak days flame indicator.
-- Carousel displays earned milestone badges.
-- Features a **Notifications Dropdown** bell alert system.
-- Displays list of downloadable shared note files and assignments (with homework upload modals).
-
-### 4. Admin Dashboard Control Suite (`AdminDashboard.jsx`)
-- Restructured into Tabs:
-  1. **Overview**: Shows metrics cards and responsive DAU bar charts & learning curve line charts using Chart.js.
-  2. **User Directory**: Toggle student/tutor roles, suspend accounts, and permanently delete users.
-  3. **Study Notes**: Publish note PDFs/DOCXs/PPTs.
-  4. **Assignments**: Publish assignments and grade student submissions with marks and comments.
-  5. **Audit Logs**: Complete listing of user activities on the platform.
-
-### 5. Quiz Timer & Explanations (`QuizPage.jsx`)
-- Implemented an automated timer countdown that auto-submits on timeout.
-- Displays XP points, correct answer reveals on failure, and tutor explanation boxes.
+### 2. Frontend & CORS Deployment Endpoints
+- **Render Backend Endpoint**: Modified `frontend/.env` to configure `VITE_API_BASE_URL` to point to the Render deployment endpoint:
+  `https://virtual-ai-tutor-tqet.onrender.com/api/v1`
+- **Vercel Deployed Frontend URL**: Configured the backend `CORS` middleware (in [config.py](file:///c:/Users/ASHWITH%20REDDY/OneDrive/Desktop/AI%20Tutor/backend/app/core/config.py) and [backend/.env](file:///c:/Users/ASHWITH%20REDDY/OneDrive/Desktop/AI%20Tutor/backend/.env)) to whitelist the Vercel deployed URL:
+  `https://virtual-ai-tutor.vercel.app`
 
 ## Verification & Execution
-- Database schema upgrades applied and verified.
-- Local dev servers running hot-reloaded:
-  - Backend: `uvicorn app.main:app` (reloaded)
-  - Frontend: `npm run dev` (hot reloaded)
-- Pytest suite runs successfully: `28 passed, 0 failed`. and pushing images to Docker Hub on merges to `main`.
-- Implemented production JSON logging formatters (`logging_config.py`), registered service health routers `/health` and `/api/v1/health/`, and embedded security headers and gzip parameters inside `nginx.conf`.
-- Wrote database automated backups scripting (`scripts/backup.sh`) replicating sql dumps into AWS S3 targets.
-
-## Next Steps
-- Add AI/ML real credentials (`OPENAI_API_KEY`, `GROQ_API_KEY`) to run adaptive tutoring sessions.
-
-
-
-
+- **Pytest Suite**: Fully passed with `28 passed, 0 failed` in 8.18s.
+- **MongoDB Persistency Verification**: Started the backend server, triggered startup database seeding, and verified that all 10 initial records (admin/student users, calculus/history courses, lessons, and MCQ quizzes) are successfully upserted into MongoDB Atlas.
+- **Synchronization Verification**: Re-ran the server startup sequence to verify that existing documents are loaded from MongoDB Atlas and that seeding is skipped successfully on subsequent runs.
