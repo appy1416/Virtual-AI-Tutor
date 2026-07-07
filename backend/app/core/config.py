@@ -43,10 +43,14 @@ class Settings:
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
     
     # Database Configuration
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", 
-        "postgresql+asyncpg://postgres:appy1416@localhost:5432/edutwin_db"
+    MONGODB_URI: str = os.getenv(
+        "MONGODB_URI", 
+        os.getenv(
+            "DATABASE_URL", 
+            "mongodb+srv://admin:admin%401416@cluster0.wuzs3wp.mongodb.net/edutwin_db?appName=Cluster0"
+        )
     )
+    DATABASE_URL: str = MONGODB_URI
     
     # SMTP & Frontend
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
