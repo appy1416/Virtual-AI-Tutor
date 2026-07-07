@@ -9,50 +9,37 @@ on:
 jobs:
   test_backend:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_PASSWORD: postgres
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
     
     - name: Install dependencies
       run: |
         cd backend
-        pip install -r requirements.txt pytest pytest-cov
+        pip install -r requirements.txt pytest-cov
     
     - name: Run tests
       env:
-        DATABASE_URL: postgresql://postgres:postgres@localhost/test
+        TESTING: "True"
       run: |
         cd backend
         pytest --cov=app tests/
-    
-    - name: Upload coverage
-      uses: codecov/codecov-action@v3
 
   test_frontend:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Set up Node
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
-        node-version: '18'
+        node-version: '20'
     
     - name: Install dependencies
       run: |
@@ -68,47 +55,3 @@ jobs:
       run: |
         cd frontend
         npm run build
-    
-    - name: Upload coverage
-      uses: codecov/codecov-action@v3
-
-  build_and_push:
-    needs: [test_backend, test_frontend]
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
-    
-    - name: Login to Docker Hub
-      uses: docker/login-action@v2
-      with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
-    
-    - name: Build and push backend
-      uses: docker/build-push-action@v4
-      with:
-        context: ./backend
-        push: true
-        tags: ${{ secrets.DOCKER_USERNAME }}/edutwin-backend:latest
-    
-    - name: Build and push frontend
-      uses: docker/build-push-action@v4
-      with:
-        context: ./frontend
-        push: true
-        tags: ${{ secrets.DOCKER_USERNAME }}/edutwin-frontend:latest
-
-  deploy:
-    needs: build_and_push
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
-    steps:
-    - name: Deploy to production
-      run: |
-        echo "Simulating SSH pull/restart actions in production cluster..."

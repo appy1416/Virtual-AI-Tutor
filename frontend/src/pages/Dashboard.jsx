@@ -16,7 +16,7 @@ import {
   Calendar,
   AlertCircle
 } from 'lucide-react';
-import api from '../config/api';
+import api, { getFileUrl } from '../config/api';
 import { useApi } from '../hooks/useApi';
 import { AuthContext } from '../context/AuthContext';
 
@@ -329,7 +329,7 @@ const Dashboard = () => {
                     <div className="flex items-center space-x-2 shrink-0">
                       {a.file_url && (
                         <a 
-                          href={a.file_url} 
+                          href={getFileUrl(a.file_url)} 
                           target="_blank" 
                           rel="noreferrer"
                           className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 hover:text-white text-slate-400 transition"
@@ -375,7 +375,7 @@ const Dashboard = () => {
                     </div>
 
                     <a 
-                      href={n.file_url} 
+                      href={getFileUrl(n.file_url)} 
                       target="_blank" 
                       rel="noreferrer"
                       className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 hover:text-white text-slate-400 transition shrink-0 mt-1"

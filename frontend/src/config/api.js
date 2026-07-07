@@ -3,6 +3,14 @@ import axios from 'axios';
 const rawBaseUrl = import.meta.env.VITE_API_BASE_URL || 'https://virtual-ai-tutor-tqet.onrender.com';
 export const API_BASE_URL = rawBaseUrl.endsWith('/api/v1') ? rawBaseUrl : `${rawBaseUrl}/api/v1`;
 
+export const getFileUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  const baseUrl = rawBaseUrl.endsWith('/') ? rawBaseUrl.slice(0, -1) : rawBaseUrl;
+  const path = url.startsWith('/') ? url : '/' + url;
+  return `${baseUrl}${path}`;
+};
+
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {

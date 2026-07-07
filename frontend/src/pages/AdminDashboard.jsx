@@ -18,7 +18,7 @@ import {
   FileSpreadsheet,
   Check
 } from 'lucide-react';
-import api from '../config/api';
+import api, { getFileUrl } from '../config/api';
 import { useApi } from '../hooks/useApi';
 
 // Chart.js imports
@@ -633,7 +633,7 @@ const AdminDashboard = () => {
 
                     <div className="flex items-center space-x-2">
                       <a 
-                        href={n.file_url} 
+                        href={getFileUrl(n.file_url)} 
                         target="_blank" 
                         rel="noreferrer" 
                         className="p-2 border border-slate-800 hover:text-white rounded-lg transition"
@@ -800,7 +800,7 @@ const AdminDashboard = () => {
                           <p className="text-xs text-slate-400 leading-normal mt-1">{s.submission_text}</p>
                           {s.file_url && (
                             <a 
-                              href={s.file_url} 
+                              href={getFileUrl(s.file_url)} 
                               target="_blank" 
                               rel="noreferrer"
                               className="text-[11px] text-brand-400 font-bold hover:underline flex items-center space-x-1 mt-1"
